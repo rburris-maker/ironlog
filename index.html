@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Ironlog</title>
+  <meta name="description" content="Log workouts fast, see what you lifted last time, and track personal records.">
+  <meta name="theme-color" content="#000000">
+  <meta name="color-scheme" content="dark">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Ironlog">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,800;1,900&family=Archivo+Narrow:wght@500;600;700&display=swap">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="auth" hidden></div>
+
+  <div id="app" hidden>
+    <main id="view"></main>
+    <div id="dock">
+      <div id="rest-bar" hidden></div>
+      <div id="active-bar" hidden></div>
+      <nav id="nav" aria-label="Main"></nav>
+    </div>
+  </div>
+
+  <div id="overlays"></div>
+  <div id="toasts" aria-live="polite"></div>
+
+  <noscript><p style="padding:24px;color:#fff;font-family:sans-serif">Ironlog needs JavaScript turned on.</p></noscript>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
