@@ -15,8 +15,9 @@ try { state = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { state =
 const save = () => { try { state ? localStorage.setItem(KEY, JSON.stringify(state)) : localStorage.removeItem(KEY); } catch { /* ignore */ } };
 
 export const rest = {
-  start(seconds) {
-    state = { endsAt: Date.now() + seconds * 1000, total: seconds };
+  /** Start a countdown. `label` and `doneText` let the same bar time an AMRAP set. */
+  start(seconds, { label = 'Rest', doneText = 'Rest is over — next set.' } = {}) {
+    state = { endsAt: Date.now() + seconds * 1000, total: seconds, label, doneText };
     save(); drawBar();
   },
   stop() { state = null; save(); drawBar(); },
@@ -29,7 +30,7 @@ export const rest = {
   active() { return !!state; },
 };
 
-function alertDone() {
+function alertDone(text) {
   try { if (navigator.vibrate) navigator.vibrate([180, 90, 180]); } catch { /* ignore */ }
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -44,7 +45,7 @@ function alertDone() {
       setTimeout(() => ac.close().catch(() => {}), 900);
     }
   } catch { /* sound is optional */ }
-  toast('Rest is over — next set.', { kind: 'info' });
+  toast(text || 'Rest is over — next set.', { kind: 'info', duration: 5000 });
 }
 
 function drawBar() {
@@ -56,7 +57,7 @@ function drawBar() {
   bar.append(
     h('div', { class: 'rest-track' }, h('div', { class: 'rest-fill', id: 'rest-fill' })),
     h('div', { class: 'rest-row' },
-      h('span', { class: 'rest-label' }, icon('timer', 20), 'Rest'),
+      h('span', { class: 'rest-label' }, icon('timer', 20), state.label || 'Rest'),
       h('span', { class: 'rest-time', id: 'rest-time', 'aria-live': 'off' }, fmtCountdown(rest.remaining())),
       h('button', { class: 'chip-btn', onClick: () => rest.add(15) }, '+15 s'),
       h('button', { class: 'chip-btn', onClick: () => rest.stop() }, 'Skip')));
@@ -69,8 +70,9 @@ export function tickRest() {
   const left = rest.remaining();
   if (left <= 0) {
     const late = -left;
+    const text = state.doneText;
     state = null; save(); drawBar();
-    if (late < 5 && document.visibilityState === 'visible') alertDone();
+    if (late < 5 && document.visibilityState === 'visible') alertDone(text);
     return;
   }
   const t = document.getElementById('rest-time');

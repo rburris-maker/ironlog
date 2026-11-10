@@ -1,10 +1,10 @@
 // History: every completed workout, searchable; workout detail; editing and deleting.
 
 import { h, icon, confirmDialog, promptDialog, toast, actionSheet, add } from '../lib/dom.js';
-import { fmtDate, fmtDateFull, fmtTime, fmtDurationShort, fmtDurationLong, fmtVolume, fmtMonth, fmtSet, fmtInt, fmtNum, localDay, toLocalInput, plural } from '../lib/format.js';
+import { fmtDate, fmtDateFull, fmtTime, fmtDurationShort, fmtDurationLong, fmtVolume, fmtMonth, fmtSet, fmtInt, fmtNum, fmtCountdown, localDay, toLocalInput, plural } from '../lib/format.js';
 import { store } from '../core/store.js';
 import { epley, countableSets, volumeOf } from '../core/calc.js';
-import { tidy, templateFromWorkout } from '../core/session.js';
+import { tidy, templateFromWorkout, supersetInfo } from '../core/session.js';
 import { pushPage, popPage, registerScreen, pageHeader, screenHeader, refresh } from './app.js';
 import { repeatWorkout, summarizeExercises, prList } from './active.js';
 import { workoutEditor } from './editor.js';
@@ -126,6 +126,8 @@ export function renderWorkoutDetail(el, id) {
 
   const fact = (value, label) => h('div', { class: 'fact' }, h('div', { class: 'fact-value' }, value), h('div', { class: 'fact-label' }, label));
 
+  const groups = supersetInfo(w.exercises);
+
   add(el, 
     pageHeader(w.name, { action: h('button', { class: 'icon-btn', 'aria-label': 'Workout options', 'data-action': 'workout-menu', onClick: menu }, icon('more', 24)) }),
     h('p', { class: 'detail-date' }, `${fmtDateFull(w.startedAt)} at ${fmtTime(w.startedAt)}`),
@@ -137,7 +139,9 @@ export function renderWorkoutDetail(el, id) {
     sum.prs.length > 0 && h('section', { class: 'block' }, h('h2', { class: 'block-title' }, plural(sum.prs.length, 'personal record')), prList(sum.prs, unit)),
     w.exercises.map((e) => {
       const sets = countableSets(e, w.unit, unit);
-      return h('section', { class: 'block detail-ex' },
+      const ss = groups.get(e.uid);
+      return h('section', { class: `block detail-ex ${ss ? `ss ${ss.first ? 'ss-first' : ''} ${ss.last ? 'ss-last' : ''}` : ''}` },
+        ss && h('p', { class: 'ss-label' }, `Superset ${ss.letter}`, h('span', null, `${ss.position} of ${ss.size}`)),
         h('div', { class: 'block-head' }, h('h2', { class: 'ex-name' }, store.exerciseName(e.exerciseId, e.name)), h('span', { class: 'muted' }, fmtVolume(volumeOf(sets), unit))),
         e.notes && h('p', { class: 'detail-note' }, e.notes),
         h('table', { class: 'detail-sets' },
@@ -147,7 +151,9 @@ export function renderWorkoutDetail(el, id) {
             const flags = sum.setFlags.get(s.id);
             return h('tr', { class: flags ? 'pr' : '' },
               h('td', null, String(i + 1)),
-              h('td', null, h('strong', null, fmtSet(s.weight, s.reps)), s.weight > 0 ? ` ${unit}` : '', flags && h('span', { class: 'pr-tag' }, 'PR')),
+              h('td', null, h('strong', null, fmtSet(s.weight, s.reps)), s.weight > 0 ? ` ${unit}` : '',
+                s.amrap && h('span', { class: 'amrap-tag' }, s.seconds ? `AMRAP ${fmtCountdown(s.seconds)}` : 'AMRAP'),
+                flags && h('span', { class: 'pr-tag' }, 'PR')),
               h('td', { class: 'muted' }, est != null && s.reps > 1 ? `${fmtNum(Math.round(est))} est.` : s.reps === 1 && s.weight > 0 ? 'actual' : '—'));
           }))));
     }),

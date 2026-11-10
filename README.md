@@ -5,6 +5,7 @@ home screen, and then runs full screen like an app-store app — no store submis
 
 - Log sets with one tap; what you lifted last time sits beside every set
 - Start blank, from a template, or by repeating any past workout
+- AMRAP sets with an optional time and countdown, and supersets (in workouts and templates)
 - Personal records detected automatically and recalculated when history changes
 - Workout timer that keeps correct time through refreshes, app switches and a locked phone
 - History with search and filters, per-exercise progress charts, PR dashboard
@@ -141,6 +142,10 @@ Design decisions worth knowing:
 - **Estimated 1RM** = weight × (1 + reps ÷ 30) (Epley), from sets of 1–12 reps. It is
   always labelled "est." and is tracked separately from the heaviest lift actually completed.
 - The **first session** of an exercise sets the baseline and is not announced as a PR.
+- **AMRAP sets** count like any other set, but their reps are never filled in from last
+  time — you type what you got. Tap a set number to make it AMRAP and give it a time.
+- **Supersets** link neighbouring exercises (exercise menu → Superset with…). With the
+  automatic rest timer on, rest starts only after the last exercise of the round.
 - PR types: heaviest weight, best estimated 1RM, most reps at a given weight, most
   volume for an exercise in one workout, and most total volume in a workout.
 - **Repeating** a workout creates a new session with its own ID; the original is only read.
@@ -179,7 +184,7 @@ against a local PostgreSQL loaded with `schema.sql` — see the comments at the 
   changes waiting to upload; otherwise it is removed from the device.
 - Fonts and the sign-in library are fetched from public CDNs on first load, then cached
   for offline use.
-- No social features, plate calculator, supersets or Apple Health/Google Fit integration.
+- No social features, plate calculator or Apple Health/Google Fit integration.
 
 ## Going native later
 

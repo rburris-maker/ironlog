@@ -1,7 +1,7 @@
 // Exercise picker: search the library, filter by muscle group, or create a custom exercise.
 
 import { h, clear, icon, openSheet } from '../lib/dom.js';
-import { fmtDate } from '../lib/format.js';
+import { fmtDate, fmtCountdown } from '../lib/format.js';
 import { store } from '../core/store.js';
 import { GROUPS } from '../core/exercises.js';
 
@@ -89,6 +89,35 @@ export function createExercise(name, group, done) {
         h('div', { class: 'btn-row' },
           h('button', { class: 'btn btn-quiet', type: 'button', onClick: () => close() }, 'Cancel'),
           h('button', { class: 'btn btn-primary', type: 'submit' }, 'Create exercise')));
+    },
+  });
+}
+
+const DURATION_PRESETS = [30, 45, 60, 90, 120, 180, 300, 600];
+
+/** Choose a time for an AMRAP set. Calls onPick(seconds) — or onPick(null) for "no time". */
+export function pickDuration({ title = 'Time', value = null, onPick }) {
+  openSheet({
+    title,
+    body: (close) => {
+      const choose = (secs) => { close(); onPick(secs); };
+      const mm = h('input', { class: 'field num-field', type: 'text', inputmode: 'numeric', maxlength: '2', 'aria-label': 'Minutes', value: value ? String(Math.floor(value / 60)) : '', placeholder: '0', onFocus: (e) => e.target.select() });
+      const ss = h('input', { class: 'field num-field', type: 'text', inputmode: 'numeric', maxlength: '2', 'aria-label': 'Seconds', value: value ? String(value % 60) : '', placeholder: '00', onFocus: (e) => e.target.select() });
+      return h('div', null,
+        h('div', { class: 'preset-grid' }, DURATION_PRESETS.map((secs) =>
+          h('button', { class: `preset ${value === secs ? 'on' : ''}`, type: 'button', 'data-seconds': String(secs), onClick: () => choose(secs) }, h('strong', null, fmtCountdown(secs))))),
+        h('form', { onSubmit: (e) => {
+          e.preventDefault();
+          const total = (parseInt(mm.value, 10) || 0) * 60 + (parseInt(ss.value, 10) || 0);
+          if (total > 0) choose(Math.min(total, 5999));
+        } },
+          h('p', { class: 'label' }, 'Or enter your own'),
+          h('div', { class: 'time-parts two-parts' },
+            h('label', { class: 'time-part' }, mm, h('span', null, 'minutes')),
+            h('label', { class: 'time-part' }, ss, h('span', null, 'seconds'))),
+          h('div', { class: 'btn-row' },
+            h('button', { class: 'btn btn-quiet', type: 'button', onClick: () => choose(null) }, 'No time'),
+            h('button', { class: 'btn btn-primary', type: 'submit' }, 'Set time'))));
     },
   });
 }

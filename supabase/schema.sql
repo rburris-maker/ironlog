@@ -170,7 +170,10 @@ select
   e.ordinality                        as exercise_position,
   s.ordinality                        as set_number,
   (s.value ->> 'weight')::numeric     as weight,
-  (s.value ->> 'reps')::integer       as reps
+  (s.value ->> 'reps')::integer       as reps,
+  coalesce((s.value ->> 'amrap')::boolean, false) as amrap,
+  (s.value ->> 'seconds')::integer    as amrap_seconds,
+  e.value ->> 'supersetId'            as superset_id
 from public.workouts w
 cross join lateral jsonb_array_elements(w.exercises) with ordinality as e (value, ordinality)
 cross join lateral jsonb_array_elements(e.value -> 'sets') with ordinality as s (value, ordinality)

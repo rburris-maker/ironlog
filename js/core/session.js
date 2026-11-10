@@ -6,10 +6,15 @@ import { uid, nowIso } from './store.js';
 
 const round = (n) => (n == null ? null : Math.round(n * 100) / 100);
 
+/**
+ * A set. `target` carries suggested numbers (from a template or a repeated workout)
+ * and whether the set is AMRAP ("as many reps as possible"), optionally with a time in seconds.
+ */
 export function newSet(target) {
   const s = { id: uid(), weight: null, reps: null, done: false };
-  if (target && (target.weight != null || target.reps != null)) {
-    s.target = { weight: target.weight ?? null, reps: target.reps ?? null };
+  if (target) {
+    if (target.amrap) { s.amrap = true; if (target.seconds > 0) s.seconds = target.seconds; }
+    if (target.weight != null || target.reps != null) s.target = { weight: target.weight ?? null, reps: target.reps ?? null };
   }
   return s;
 }
@@ -22,6 +27,54 @@ export function newEntry(exercise, targets = []) {
     notes: '',
     sets: targets.length ? targets.map(newSet) : [newSet()],
   };
+}
+
+// ---------- supersets ----------
+// Exercises that share a `supersetId` and sit next to each other are done back to back.
+
+/** Drop superset marks from exercises that no longer have a partner beside them. */
+export function normalizeSupersets(entries) {
+  const lonely = entries.filter((e, i) => {
+    if (!e.supersetId) return false;
+    const p = entries[i - 1], n = entries[i + 1];
+    return !((p && p.supersetId === e.supersetId) || (n && n.supersetId === e.supersetId));
+  });
+  lonely.forEach((e) => { delete e.supersetId; });
+  return entries;
+}
+
+/** Map of entry uid → { letter, first, last, position, size } for every exercise in a superset. */
+export function supersetInfo(entries) {
+  const info = new Map();
+  let letter = 0;
+  for (let i = 0; i < entries.length; i++) {
+    const id = entries[i].supersetId;
+    if (!id) continue;
+    let j = i;
+    while (j + 1 < entries.length && entries[j + 1].supersetId === id) j += 1;
+    if (j > i) {
+      const name = String.fromCharCode(65 + (letter % 26));
+      for (let k = i; k <= j; k++) info.set(entries[k].uid, { letter: name, first: k === i, last: k === j, position: k - i + 1, size: j - i + 1 });
+      letter += 1;
+    }
+    i = j;
+  }
+  return info;
+}
+
+/** Put two neighbouring exercises in the same superset (joining an existing one if either is already in it). */
+export function linkSuperset(entries, i, j) {
+  const a = entries[i], b = entries[j];
+  if (!a || !b || Math.abs(i - j) !== 1) return;
+  const id = a.supersetId || b.supersetId || uid();
+  const other = b.supersetId && b.supersetId !== id ? b.supersetId : null;
+  if (other) entries.forEach((e) => { if (e.supersetId === other) e.supersetId = id; });
+  a.supersetId = id; b.supersetId = id;
+}
+
+export function unlinkSuperset(entries, i) {
+  if (entries[i]) delete entries[i].supersetId;
+  normalizeSupersets(entries);
 }
 
 function defaultName(d = new Date()) {
@@ -53,10 +106,15 @@ export function workoutFromTemplate(tpl, prefs, nameOf) {
   const w = blankWorkout(prefs, tpl.name);
   w.templateId = tpl.id;
   const from = tpl.unit || prefs.unit;
-  w.exercises = (tpl.exercises || []).map((e) => newEntry(
-    { id: e.exerciseId, name: nameOf(e.exerciseId, e.name) },
-    (e.sets || []).map((s) => ({ weight: round(convert(s.weight, from, w.unit)), reps: s.reps })),
-  ));
+  w.exercises = (tpl.exercises || []).map((e) => {
+    const entry = newEntry(
+      { id: e.exerciseId, name: nameOf(e.exerciseId, e.name) },
+      (e.sets || []).map((s) => ({ weight: round(convert(s.weight, from, w.unit)), reps: s.amrap ? null : s.reps, amrap: !!s.amrap, seconds: s.seconds })),
+    );
+    if (e.supersetId) entry.supersetId = e.supersetId;
+    return entry;
+  });
+  normalizeSupersets(w.exercises);
   return w;
 }
 
@@ -75,11 +133,13 @@ export function workoutFromPrevious(src, prefs, nameOf) {
       if (!done.length) return null;
       const entry = newEntry(
         { id: e.exerciseId, name: nameOf(e.exerciseId, e.name) },
-        done.map((s) => ({ weight: round(convert(s.weight, src.unit, w.unit)), reps: s.reps })),
+        done.map((s) => ({ weight: round(convert(s.weight, src.unit, w.unit)), reps: s.reps, amrap: !!s.amrap, seconds: s.seconds })),
       );
+      if (e.supersetId) entry.supersetId = e.supersetId;
       return entry;
     })
     .filter(Boolean);
+  normalizeSupersets(w.exercises);
   return w;
 }
 
@@ -102,9 +162,14 @@ export function tidy(w, { countFilled = false } = {}) {
     for (const s of e.sets) {
       if (countFilled && !s.done && Number.isFinite(s.reps) && s.reps > 0) s.done = true;
     }
-    e.sets = e.sets.filter(isCountable).map((s) => ({ id: s.id, weight: Number.isFinite(s.weight) ? s.weight : 0, reps: s.reps, done: true }));
+    e.sets = e.sets.filter(isCountable).map((s) => {
+      const kept = { id: s.id, weight: Number.isFinite(s.weight) ? s.weight : 0, reps: s.reps, done: true };
+      if (s.amrap) { kept.amrap = true; if (s.seconds > 0) kept.seconds = s.seconds; }
+      return kept;
+    });
   }
   w.exercises = w.exercises.filter((e) => e.sets.length > 0);
+  normalizeSupersets(w.exercises);
   return w;
 }
 
@@ -130,7 +195,12 @@ export function templateFromWorkout(w, name) {
       uid: uid(),
       exerciseId: e.exerciseId,
       name: e.name,
-      sets: e.sets.filter((s) => Number.isFinite(s.reps) && s.reps > 0).map((s) => ({ weight: Number.isFinite(s.weight) ? s.weight : null, reps: s.reps })),
+      ...(e.supersetId ? { supersetId: e.supersetId } : {}),
+      sets: e.sets.filter((s) => Number.isFinite(s.reps) && s.reps > 0).map((s) => ({
+        weight: Number.isFinite(s.weight) ? s.weight : null,
+        reps: s.amrap ? null : s.reps,
+        ...(s.amrap ? { amrap: true, ...(s.seconds > 0 ? { seconds: s.seconds } : {}) } : {}),
+      })),
     })).map((e) => (e.sets.length ? e : { ...e, sets: [{ weight: null, reps: null }] })),
   };
 }

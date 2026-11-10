@@ -1,13 +1,13 @@
 // Workouts tab: saved templates (create, edit, rename, duplicate, delete) and the exercise library.
 
 import { h, clear, icon, actionSheet, confirmDialog, promptDialog, toast, segmented, add } from '../lib/dom.js';
-import { fmtDate, fmtNum, parseNum, plural } from '../lib/format.js';
+import { fmtDate, fmtNum, fmtCountdown, parseNum, plural } from '../lib/format.js';
 import { store, uid } from '../core/store.js';
-import { duplicateTemplate } from '../core/session.js';
+import { duplicateTemplate, supersetInfo, linkSuperset, unlinkSuperset, normalizeSupersets } from '../core/session.js';
 import { GROUPS } from '../core/exercises.js';
 import { pushPage, popPage, registerScreen, pageHeader, screenHeader, refresh } from './app.js';
 import { startFromTemplate, summarizeExercises } from './active.js';
-import { pickExercise, createExercise } from './pickers.js';
+import { pickExercise, createExercise, pickDuration } from './pickers.js';
 import { openExerciseProgress } from './progress.js';
 
 let tab = 'templates';
@@ -84,21 +84,36 @@ function templatePage(id) {
     const drawList = () => {
       clear(list);
       if (!draft.exercises.length) list.append(h('p', { class: 'empty-note' }, 'Add the exercises for this routine, in the order you do them.'));
+      const groups = supersetInfo(draft.exercises);
       draft.exercises.forEach((e, pos) => {
+        const ss = groups.get(e.uid);
+        const next = draft.exercises[pos + 1];
+        const linkedBelow = next && e.supersetId && next.supersetId === e.supersetId;
+        const setMenu = (st, i) => actionSheet(`${store.exerciseName(e.exerciseId, e.name)}, set ${i + 1}`, [
+          st.amrap
+            ? { label: 'Make this a regular set', icon: 'repeat', onSelect: () => { delete st.amrap; delete st.seconds; touch(); drawList(); } }
+            : { label: 'Make this an AMRAP set', icon: 'timer', onSelect: () => { st.amrap = true; st.reps = null; touch(); drawList(); } },
+          st.amrap && { label: st.seconds ? `Change time (${fmtCountdown(st.seconds)})` : 'Add a time', icon: 'timer', onSelect: () => pickDuration({ title: 'AMRAP time', value: st.seconds || null, onPick: (secs) => { if (secs) st.seconds = secs; else delete st.seconds; touch(); drawList(); } }) },
+        ]);
         const rows = h('div', { class: 'sets' },
           h('div', { class: 'set-row set-head tpl' }, h('span', null, 'Set'), h('span', null, `Target ${unit}`), h('span', null, 'Target reps'), h('span', { class: 'sr-only' }, 'Remove')),
           e.sets.map((s, i) => h('div', { class: 'set-row tpl' },
-            h('span', { class: 'set-num static' }, String(i + 1)),
+            h('button', { class: 'set-num', type: 'button', 'aria-label': `Set ${i + 1} options`, onClick: () => setMenu(s, i) }, String(i + 1)),
             h('span', null, h('input', { class: 'num', type: 'text', inputmode: 'decimal', placeholder: '—', 'aria-label': `Set ${i + 1} target weight`, value: s.weight != null ? fmtNum(s.weight) : '', onFocus: (ev) => ev.target.select(), onInput: (ev) => { s.weight = parseNum(ev.target.value); touch(); } })),
-            h('span', null, h('input', { class: 'num', type: 'text', inputmode: 'numeric', placeholder: '—', 'aria-label': `Set ${i + 1} target reps`, value: s.reps != null ? String(s.reps) : '', onFocus: (ev) => ev.target.select(), onInput: (ev) => { const n = parseNum(ev.target.value); s.reps = n == null ? null : Math.round(n); touch(); } })),
+            s.amrap
+              ? h('button', { class: 'num num-amrap', type: 'button', 'aria-label': `Set ${i + 1} is AMRAP. Tap to set a time.`, onClick: () => pickDuration({ title: 'AMRAP time', value: s.seconds || null, onPick: (secs) => { if (secs) s.seconds = secs; else delete s.seconds; touch(); drawList(); } }) }, s.seconds ? `AMRAP ${fmtCountdown(s.seconds)}` : 'AMRAP')
+              : h('span', null, h('input', { class: 'num', type: 'text', inputmode: 'numeric', placeholder: '—', 'aria-label': `Set ${i + 1} target reps`, value: s.reps != null ? String(s.reps) : '', onFocus: (ev) => ev.target.select(), onInput: (ev) => { const n = parseNum(ev.target.value); s.reps = n == null ? null : Math.round(n); touch(); } })),
             h('button', { class: 'icon-btn', 'aria-label': `Remove set ${i + 1}`, onClick: () => { e.sets.splice(i, 1); touch(); drawList(); } }, icon('close', 18)))));
-        list.append(h('section', { class: 'ex' },
+        list.append(h('section', { class: `ex ${ss ? `ss ${ss.first ? 'ss-first' : ''} ${ss.last ? 'ss-last' : ''}` : ''}`, 'data-template-exercise': e.exerciseId },
+          ss && h('p', { class: 'ss-label' }, `Superset ${ss.letter}`, h('span', null, `${ss.position} of ${ss.size}`)),
           h('header', { class: 'ex-head' },
             h('div', { class: 'ex-title' }, h('h2', { class: 'ex-name' }, store.exerciseName(e.exerciseId, e.name))),
             h('div', { class: 'ex-tools' },
-              h('button', { class: 'icon-btn', 'aria-label': 'Move up', disabled: pos === 0, onClick: () => { draft.exercises.splice(pos - 1, 0, draft.exercises.splice(pos, 1)[0]); touch(); drawList(); } }, icon('up', 20)),
-              h('button', { class: 'icon-btn', 'aria-label': 'Move down', disabled: pos === draft.exercises.length - 1, onClick: () => { draft.exercises.splice(pos + 1, 0, draft.exercises.splice(pos, 1)[0]); touch(); drawList(); } }, icon('down', 20)),
-              h('button', { class: 'icon-btn danger', 'aria-label': `Remove ${e.name}`, onClick: () => { draft.exercises.splice(pos, 1); touch(); drawList(); } }, icon('trash', 20)))),
+              h('button', { class: `icon-btn ${linkedBelow ? 'on' : ''}`, 'aria-label': linkedBelow ? 'Remove superset link with the exercise below' : 'Superset with the exercise below', 'aria-pressed': linkedBelow ? 'true' : 'false', title: 'Superset with the exercise below', disabled: !next, 'data-action': 'link-below',
+                onClick: () => { if (linkedBelow) { if (!ss || ss.first) unlinkSuperset(draft.exercises, pos); else unlinkSuperset(draft.exercises, pos + 1); } else linkSuperset(draft.exercises, pos, pos + 1); touch(); drawList(); } }, icon('link', 20)),
+              h('button', { class: 'icon-btn', 'aria-label': 'Move up', disabled: pos === 0, onClick: () => { draft.exercises.splice(pos - 1, 0, draft.exercises.splice(pos, 1)[0]); normalizeSupersets(draft.exercises); touch(); drawList(); } }, icon('up', 20)),
+              h('button', { class: 'icon-btn', 'aria-label': 'Move down', disabled: pos === draft.exercises.length - 1, onClick: () => { draft.exercises.splice(pos + 1, 0, draft.exercises.splice(pos, 1)[0]); normalizeSupersets(draft.exercises); touch(); drawList(); } }, icon('down', 20)),
+              h('button', { class: 'icon-btn danger', 'aria-label': `Remove ${e.name}`, onClick: () => { draft.exercises.splice(pos, 1); normalizeSupersets(draft.exercises); touch(); drawList(); } }, icon('trash', 20)))),
           rows,
           h('button', { class: 'add-set', onClick: () => { const prev = e.sets[e.sets.length - 1]; e.sets.push(prev ? { ...prev } : { weight: null, reps: null }); touch(); drawList(); } }, icon('plus', 18), 'Add set')));
       });
@@ -108,7 +123,7 @@ function templatePage(id) {
     drawList();
     add(el, 
       pageHeader(existing ? 'Edit template' : 'New template', { onBack: cancel, backLabel: 'Cancel', action: h('button', { class: 'btn btn-primary', 'data-action': 'save-template', onClick: save }, 'Save template') }),
-      h('div', { class: 'form' }, nameInput, h('p', { class: 'hint' }, 'Targets are optional. Leave them blank and the app suggests what you lifted last time.')),
+      h('div', { class: 'form' }, nameInput, h('p', { class: 'hint' }, 'Targets are optional. Leave them blank and the app suggests what you lifted last time. Tap a set number to make it AMRAP; use the link button to superset an exercise with the one below it.')),
       list,
       h('button', { class: 'btn btn-outline btn-block btn-lg', 'data-action': 'add-exercise', onClick: () => pickExercise({ onPick: (ex) => {
         draft.exercises.push({ uid: uid(), exerciseId: ex.id, name: ex.name, sets: [{ weight: null, reps: null }, { weight: null, reps: null }, { weight: null, reps: null }] });

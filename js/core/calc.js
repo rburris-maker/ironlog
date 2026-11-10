@@ -35,7 +35,9 @@ export function countableSets(entry, fromUnit, unit) {
   for (const s of entry.sets || []) {
     if (!isCountable(s)) continue;
     const w = Number.isFinite(s.weight) ? s.weight : 0;
-    out.push({ id: s.id, weight: convert(w, fromUnit, unit), reps: s.reps });
+    const set = { id: s.id, weight: convert(w, fromUnit, unit), reps: s.reps };
+    if (s.amrap) { set.amrap = true; if (s.seconds > 0) set.seconds = s.seconds; }
+    out.push(set);
   }
   return out;
 }

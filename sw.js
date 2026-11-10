@@ -6,7 +6,7 @@
 //
 // Bump VERSION (and js/version.js) whenever you deploy changes.
 
-const VERSION = 'ironlog-v5';
+const VERSION = 'ironlog-v6';
 
 const SHELL = [
   './',

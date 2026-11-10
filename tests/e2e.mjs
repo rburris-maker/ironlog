@@ -390,6 +390,76 @@ console.log('\nPart 1b — timer and record recalculation (fresh device)');
     assert.equal(after.push, null, 'the template it was copied from is unaffected');
   });
 
+  await step('AMRAP sets with a time, and supersets, can be logged and are kept in history and on repeat', async () => {
+    await tab(page, 'home');
+    await startBlank(page);
+    await renameWorkout(page, 'Superset Day');
+    await addExercise(page, 'Push-Up');
+    await addExercise(page, 'Chin-Up');
+    // AMRAP: mark set 1 of Push-Up, give it 1:00, start the countdown
+    await rows(page, 'Push-Up').nth(0).locator('.set-num').click();
+    await page.click('.menu-item:has-text("Make this an AMRAP set")');
+    await page.waitForSelector('.set-extra .amrap-tag');
+    await page.click('[data-action="amrap-time"]');
+    await page.click('.preset[data-seconds="60"]');
+    assert.equal(await page.locator('[data-action="amrap-time"]').innerText(), '1:00');
+    await page.click('[data-action="amrap-start"]');
+    await page.waitForSelector('#rest-bar:not([hidden])');
+    assert.match(await page.locator('#rest-bar').innerText(), /AMRAP/i);
+    assert.match(await page.locator('#rest-time').innerText(), /^(1:00|0:5\d)$/);
+    await page.click('#rest-bar >> text=Skip');
+    // an AMRAP set is never filled in automatically: the check mark asks for reps
+    await rows(page, 'Push-Up').nth(0).locator('.set-check').click();
+    assert.ok(!(await rows(page, 'Push-Up').nth(0).evaluate((el) => el.classList.contains('done'))));
+    await logSet(page, 'Push-Up', 0, null, 31);
+    // superset: link Push-Up with Chin-Up
+    await exercise(page, 'Push-Up').locator('.ex-head .icon-btn').click();
+    await page.click('.menu-item:has-text("Superset with Chin-Up")');
+    await page.waitForSelector('.ex.ss');
+    assert.deepEqual(await page.locator('.ss-label').allTextContents(), ['Superset A1 of 2', 'Superset A2 of 2']);
+    await logSet(page, 'Chin-Up', 0, null, 8);
+    await finish(page);
+    await page.click('[data-action="summary-done"]');
+    const saved = await data(page, (store) => store.workouts()[0]);
+    assert.equal(saved.name, 'Superset Day');
+    assert.deepEqual(saved.exercises[0].sets[0], { id: saved.exercises[0].sets[0].id, weight: 0, reps: 31, done: true, amrap: true, seconds: 60 });
+    assert.ok(saved.exercises[0].supersetId && saved.exercises[0].supersetId === saved.exercises[1].supersetId);
+    // history detail shows both
+    await tab(page, 'history');
+    await page.locator('[data-workout]').first().click();
+    const detail = await page.locator('#view').innerText();
+    assert.match(detail, /AMRAP 1:00/);
+    assert.match(detail, /Superset A/i);
+    await shot(page, '16-amrap-superset-detail');
+    // repeating keeps the AMRAP set (with its time) and the superset
+    await page.click('[data-action="repeat"]');
+    await page.waitForSelector('.live-head');
+    assert.equal(await page.locator('.ss-label').count(), 2);
+    assert.equal(await page.locator('[data-action="amrap-time"]').innerText(), '1:00');
+    assert.equal(await rows(page, 'Push-Up').nth(0).locator('.set-prev').innerText(), 'BW × 31');
+    await shot(page, '17-amrap-superset-live');
+    await page.click('[data-action="discard"]');
+    await page.click('[data-confirm]');
+    await ready(page);
+    // templates: mark a set AMRAP and link two exercises
+    await tab(page, 'workouts');
+    await page.locator('[data-template="Pull Day"] .list-main').click();
+    await page.locator('[data-template-exercise="deadlift"] [data-action="link-below"]').click();
+    assert.equal(await page.locator('.ss-label').count(), 2);
+    await page.locator('[data-template-exercise="lat-pulldown"] .set-num').last().click();
+    await page.click('.menu-item:has-text("Make this an AMRAP set")');
+    await page.waitForSelector('.num-amrap');
+    await page.click('[data-action="save-template"]');
+    await page.waitForSelector('[data-template="Pull Day"]');
+    await page.locator('[data-template="Pull Day"] .btn-primary').click();
+    await page.waitForSelector('.live-head');
+    assert.equal(await page.locator('.ss-label').count(), 2);
+    assert.equal(await exercise(page, 'Lat Pulldown').locator('.set-extra .amrap-tag').count(), 1);
+    await page.click('[data-action="discard"]');
+    await page.click('[data-confirm]');
+    await ready(page);
+  });
+
   await step('History search and filters; progress charts render from saved data', async () => {
     await tab(page, 'history');
     await page.fill('.search-row input', 'bench');
@@ -404,6 +474,8 @@ console.log('\nPart 1b — timer and record recalculation (fresh device)');
     await shot(page, '12-history');
     await tab(page, 'progress');
     await page.click('.seg-item:text-is("By exercise")');
+    await page.click('[data-action="pick-exercise"]');
+    await page.locator('.pick-item', { has: page.locator('.pick-name', { hasText: /^Bench Press$/ }) }).first().click();
     await page.waitForSelector('.chart svg .line');
     assert.equal(await page.locator('.chart svg circle.dot:not(.dot-focus)').count(), 2, 'one point per saved session');
     await page.click('.seg-item:text-is("Est. 1RM")');

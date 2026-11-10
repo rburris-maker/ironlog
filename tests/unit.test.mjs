@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import {
   epley, convert, buildIndex, lastSession, exerciseSnapshot, livePRs, timer, weeklyFrequency, exerciseSeries,
 } from '../js/core/calc.js';
-import { workoutFromPrevious, workoutFromTemplate, finishWorkout, filledButUnchecked, blankWorkout } from '../js/core/session.js';
+import { workoutFromPrevious, workoutFromTemplate, finishWorkout, filledButUnchecked, blankWorkout, supersetInfo, linkSuperset, unlinkSuperset, normalizeSupersets, templateFromWorkout } from '../js/core/session.js';
 
 let n = 0;
 const set = (weight, reps, done = true) => ({ id: `s${++n}`, weight, reps, done });
@@ -207,4 +207,65 @@ test('progress series uses saved sessions inside the chosen range', () => {
   assert.deepEqual(exerciseSeries(ix, 'bench-press', '30d', now).map((p) => p.maxWeight), [190, 195]);
   assert.equal(exerciseSeries(ix, 'bench-press', 'all', now).length, 3);
   assert.equal(exerciseSeries(ix, 'bench-press', '30d', now)[1].bestReps, 12);
+});
+
+test('AMRAP sets keep their flag and time through finishing, repeating and templates, and still count for records', () => {
+  const w = blankWorkout({ unit: 'lb' }, 'Push Day');
+  w.timer = { accumulatedMs: 60_000, runningSince: null };
+  w.exercises = [{ uid: 'a', exerciseId: 'bench-press', name: 'Bench Press', sets: [set(185, 5), { id: 'am', weight: 135, reps: 17, done: true, amrap: true, seconds: 120 }] }];
+  finishWorkout(w);
+  assert.deepEqual(w.exercises[0].sets[1], { id: 'am', weight: 135, reps: 17, done: true, amrap: true, seconds: 120 });
+  const ix = buildIndex([w], 'lb');
+  assert.equal(ix.exercises.get('bench-press').sessions[0].sets[1].amrap, true);
+  assert.equal(ix.exercises.get('bench-press').records.repsAtWeight.get('135').reps, 17);
+
+  const again = workoutFromPrevious(w, { unit: 'lb' }, nameOf);
+  const amrap = again.exercises[0].sets[1];
+  assert.equal(amrap.amrap, true);
+  assert.equal(amrap.seconds, 120);
+  assert.equal(amrap.reps, null, 'today starts empty');
+  assert.equal(again.exercises[0].sets[0].amrap, undefined);
+
+  const tpl = templateFromWorkout(w, 'Push');
+  assert.deepEqual(tpl.exercises[0].sets[1], { weight: 135, reps: null, amrap: true, seconds: 120 });
+  const fromTpl = workoutFromTemplate(tpl, { unit: 'lb' }, nameOf);
+  assert.equal(fromTpl.exercises[0].sets[1].amrap, true);
+  assert.equal(fromTpl.exercises[0].sets[1].seconds, 120);
+});
+
+test('supersets: linking, labelling, unlinking and surviving a repeat', () => {
+  const e = (uid, exerciseId) => ({ uid, exerciseId, name: exerciseId, sets: [set(100, 10)] });
+  const list = [e('a', 'bench-press'), e('b', 'barbell-row'), e('c', 'squat'), e('d', 'leg-curl'), e('f', 'plank')];
+  linkSuperset(list, 0, 1);
+  linkSuperset(list, 2, 3);
+  let info = supersetInfo(list);
+  assert.deepEqual([info.get('a').letter, info.get('b').letter, info.get('c').letter, info.get('d').letter], ['A', 'A', 'B', 'B']);
+  assert.ok(info.get('a').first && info.get('b').last);
+  assert.equal(info.get('f'), undefined);
+
+  linkSuperset(list, 1, 2); // join the two pairs into one giant set
+  info = supersetInfo(list);
+  assert.equal(info.get('d').letter, 'A');
+  assert.equal(info.get('d').size, 4);
+
+  unlinkSuperset(list, 1); // pull one out of the middle: a is left alone, c + d stay together
+  info = supersetInfo(list);
+  assert.equal(info.get('a'), undefined);
+  assert.equal(list[0].supersetId, undefined);
+  assert.equal(info.get('c').size, 2);
+
+  // moving a partner away dissolves the pair
+  const moved = [list[2], list[4], list[3]];
+  normalizeSupersets(moved);
+  assert.equal(moved[0].supersetId, undefined);
+  assert.equal(moved[2].supersetId, undefined);
+
+  // a repeated workout keeps its supersets
+  const src = workout('w1', '2026-11-02', 'Upper', [['bench-press', [set(135, 10)]], ['barbell-row', [set(135, 10)]], ['plank', [set(0, 1)]]]);
+  linkSuperset(src.exercises, 0, 1);
+  const again = workoutFromPrevious(src, { unit: 'lb' }, nameOf);
+  const info2 = supersetInfo(again.exercises);
+  assert.equal(info2.get(again.exercises[0].uid).letter, 'A');
+  assert.equal(info2.get(again.exercises[1].uid).last, true);
+  assert.equal(info2.get(again.exercises[2].uid), undefined);
 });

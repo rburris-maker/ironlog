@@ -11,7 +11,8 @@ export function fmtInt(n) {
 }
 
 export const fmtWeight = (n, unit) => `${fmtNum(n)} ${unit}`;
-export const fmtSet = (weight, reps) => `${fmtNum(weight)} × ${reps}`;
+/** 135 × 10, or "BW × 12" for a bodyweight set. */
+export const fmtSet = (weight, reps) => `${weight > 0 ? fmtNum(weight) : 'BW'} × ${reps}`;
 export const fmtVolume = (n, unit) => `${fmtInt(n)} ${unit}`;
 
 const pad = (n) => String(n).padStart(2, '0');

@@ -3,11 +3,11 @@
 // inputs are pre-suggested, and one tap on the check mark logs a set.
 
 import { h, clear, icon, actionSheet, confirmDialog, openSheet, toast } from '../lib/dom.js';
-import { fmtNum, fmtSet, fmtWeight, fmtDate, parseNum, plural } from '../lib/format.js';
+import { fmtNum, fmtSet, fmtWeight, fmtDate, fmtCountdown, parseNum, plural } from '../lib/format.js';
 import { store } from '../core/store.js';
 import { exerciseSnapshot, livePRs } from '../core/calc.js';
-import { newEntry, newSet } from '../core/session.js';
-import { pickExercise } from './pickers.js';
+import { newEntry, newSet, supersetInfo, linkSuperset, unlinkSuperset, normalizeSupersets } from '../core/session.js';
+import { pickExercise, pickDuration } from './pickers.js';
 import { rest } from './rest.js';
 
 /** Suggested numbers for a set: its target, else last time's same set, else the set above it. */
@@ -71,13 +71,14 @@ export function workoutEditor({ workout, mode, onChange }) {
       for (const ev of livePRs(index(), entry, unit)) if (ev.setId) flags.set(ev.setId, ev.type);
     }
     const pos = workout.exercises.indexOf(entry);
+    const ss = supersetInfo(workout.exercises).get(entry.uid);
 
     const stat = (label, value, extra) => h('div', { class: 'ex-stat' }, h('dt', null, label), h('dd', null, value, extra && h('small', null, extra)));
     const stats = snap.timesPerformed
       ? h('dl', { class: 'ex-stats' },
         stat('Last', last ? fmtDate(last.date, { weekday: false }) : '—'),
         stat('Top set', last && last.top ? fmtSet(last.top.weight, last.top.reps) : '—'),
-        stat('Heaviest', snap.heaviest ? fmtNum(snap.heaviest.weight) : '—', snap.heaviest ? unit : ''),
+        stat('Heaviest', snap.heaviest ? (snap.heaviest.weight > 0 ? fmtNum(snap.heaviest.weight) : 'BW') : '—', snap.heaviest && snap.heaviest.weight > 0 ? unit : ''),
         stat('Est. 1RM', snap.bestEst ? fmtNum(Math.round(snap.bestEst.value)) : '—', snap.bestEst ? unit : ''))
       : h('p', { class: 'ex-first' }, 'First time logging this exercise — today sets your baseline.');
 
@@ -90,7 +91,8 @@ export function workoutEditor({ workout, mode, onChange }) {
         h('span', { role: 'columnheader', class: 'sr-only' }, 'Done')),
       entry.sets.map((s, i) => drawRow(entry, s, i, last, flags)));
 
-    return h('section', { class: 'ex', 'data-uid': entry.uid, 'data-exercise': entry.exerciseId },
+    return h('section', { class: `ex ${ss ? `ss ${ss.first ? 'ss-first' : ''} ${ss.last ? 'ss-last' : ''}` : ''}`, 'data-uid': entry.uid, 'data-exercise': entry.exerciseId },
+      ss && h('p', { class: 'ss-label' }, `Superset ${ss.letter}`, h('span', null, `${ss.position} of ${ss.size}`)),
       h('header', { class: 'ex-head' },
         h('div', { class: 'ex-title' },
           h('h2', { class: 'ex-name' }, entry.name),
@@ -109,7 +111,7 @@ export function workoutEditor({ workout, mode, onChange }) {
 
     const weight = h('input', {
       class: 'num', type: 'text', inputmode: 'decimal', autocomplete: 'off', enterkeyhint: 'next',
-      'aria-label': `Set ${i + 1} weight in ${unit}`, placeholder: sug.weight != null ? fmtNum(sug.weight) : 'BW',
+      'aria-label': `Set ${i + 1} weight in ${unit}`, placeholder: sug.weight > 0 ? fmtNum(sug.weight) : 'BW',
       value: s.weight != null ? fmtNum(s.weight) : '',
       onFocus: (e) => e.target.select(),
       onInput: (e) => { s.weight = parseNum(e.target.value); changed(); },
@@ -126,7 +128,18 @@ export function workoutEditor({ workout, mode, onChange }) {
       onChange: () => updateMarks(entry),
     });
 
-    return h('div', { class: `set-row ${s.done ? 'done' : ''} ${pr ? 'pr' : ''}`, role: 'row', 'data-set': s.id },
+    const setTime = () => pickDuration({ title: 'AMRAP time', value: s.seconds || null, onPick: (secs) => { if (secs) s.seconds = secs; else delete s.seconds; changed(); redraw(entry); } });
+    const amrapLine = s.amrap && h('div', { class: 'set-extra', 'data-amrap': s.id },
+      h('span', { class: 'amrap-tag' }, 'AMRAP'),
+      h('button', { class: 'chip-btn', type: 'button', 'data-action': 'amrap-time', onClick: setTime }, s.seconds ? fmtCountdown(s.seconds) : 'Add time'),
+      mode === 'active' && s.seconds > 0 && !s.done && h('button', { class: 'chip-btn chip-go', type: 'button', 'data-action': 'amrap-start', onClick: () => {
+        rest.start(s.seconds, { label: 'AMRAP', doneText: `Time. Enter your ${entry.name} reps.` });
+        reps.focus();
+      } }, icon('play', 14), 'Start'),
+      !s.seconds && h('span', { class: 'set-extra-note' }, 'as many reps as possible'));
+    if (s.amrap) reps.placeholder = 'max';
+
+    const row = h('div', { class: `set-row ${s.done ? 'done' : ''} ${pr ? 'pr' : ''} ${s.amrap ? 'amrap' : ''}`, role: 'row', 'data-set': s.id },
       h('button', { class: 'set-num', type: 'button', role: 'cell', 'aria-label': `Set ${i + 1} options`, onClick: () => setMenu(entry, s, i) },
         pr ? h('span', { class: 'pr-tag', title: 'Personal record' }, 'PR') : String(i + 1)),
       h('button', { class: 'set-prev', type: 'button', role: 'cell', disabled: !prev,
@@ -136,6 +149,7 @@ export function workoutEditor({ workout, mode, onChange }) {
       h('span', { role: 'cell' }, weight),
       h('span', { role: 'cell' }, reps),
       h('button', { class: 'set-check', type: 'button', role: 'cell', 'aria-pressed': s.done ? 'true' : 'false', 'aria-label': s.done ? `Set ${i + 1} done. Tap to undo.` : `Mark set ${i + 1} done`, onClick: () => toggle(entry, s, i, last) }, icon('check', 22)));
+    return amrapLine ? [row, amrapLine] : row;
   }
 
   /** Refresh the PR tags of an exercise in place (no re-render, so typing is never interrupted). */
@@ -160,7 +174,8 @@ export function workoutEditor({ workout, mode, onChange }) {
     } else {
       const sug = suggestion(entry, i, last);
       if (s.weight == null && sug.weight != null) s.weight = sug.weight;
-      if (s.reps == null && sug.reps != null) s.reps = sug.reps;
+      // An AMRAP result is whatever you managed today, so it is never filled in from last time.
+      if (s.reps == null && sug.reps != null && !s.amrap) s.reps = sug.reps;
       if (!(s.reps > 0)) {
         const input = list.querySelector(`[data-set="${s.id}"] input[inputmode="numeric"]`);
         if (input) { input.focus(); input.classList.add('shake'); setTimeout(() => input.classList.remove('shake'), 400); }
@@ -173,7 +188,9 @@ export function workoutEditor({ workout, mode, onChange }) {
         const fresh = after.filter((ev) => ev.setId === s.id && !before.some((b) => b.type === ev.type && b.setId === s.id));
         const ev = fresh.find((e) => e.type === 'weight') || fresh.find((e) => e.type === 'e1rm') || fresh.find((e) => e.type === 'reps');
         if (ev) toast(prMessage(ev, entry.name, unit), { kind: 'pr', title: 'New personal record!', duration: 4500 });
-        if (store.prefs.restAuto) rest.start(store.prefs.restSeconds);
+        const ss = supersetInfo(workout.exercises).get(entry.uid);
+        // In a superset, rest starts only after the last exercise of the round.
+        if (store.prefs.restAuto && (!ss || ss.last)) rest.start(store.prefs.restSeconds);
       }
     }
     changed();
@@ -182,6 +199,9 @@ export function workoutEditor({ workout, mode, onChange }) {
 
   function setMenu(entry, s, i) {
     actionSheet(`${entry.name}, set ${i + 1}`, [
+      s.amrap
+        ? { label: 'Make this a regular set', icon: 'repeat', onSelect: () => { delete s.amrap; delete s.seconds; changed(); redraw(entry); } }
+        : { label: 'Make this an AMRAP set', icon: 'timer', onSelect: () => { s.amrap = true; changed(); redraw(entry); } },
       { label: 'Add a set below', icon: 'plus', onSelect: () => { entry.sets.splice(i + 1, 0, newSet()); changed(); redraw(entry); } },
       { label: 'Remove this set', icon: 'trash', danger: true, onSelect: () => { entry.sets.splice(i, 1); changed(); redraw(entry); } },
     ]);
@@ -206,8 +226,21 @@ export function workoutEditor({ workout, mode, onChange }) {
     if (to < 0 || to >= workout.exercises.length) return;
     const [e] = workout.exercises.splice(pos, 1);
     workout.exercises.splice(to, 0, e);
+    normalizeSupersets(workout.exercises);
     changed();
     drawAll();
+  }
+
+  function supersetActions(entry, pos) {
+    const list = workout.exercises;
+    const next = list[pos + 1], prev = list[pos - 1];
+    const same = (other) => other && entry.supersetId && other.supersetId === entry.supersetId;
+    const link = (to) => { linkSuperset(list, pos, to); changed(); drawAll(); };
+    return [
+      next && !same(next) && { label: `Superset with ${next.name} (below)`, icon: 'link', onSelect: () => link(pos + 1) },
+      prev && !same(prev) && { label: `Superset with ${prev.name} (above)`, icon: 'link', onSelect: () => link(pos - 1) },
+      (same(next) || same(prev)) && { label: 'Remove from superset', icon: 'close', onSelect: () => { unlinkSuperset(list, pos); changed(); drawAll(); } },
+    ];
   }
 
   function entryMenu(entry, pos) {
@@ -215,11 +248,13 @@ export function workoutEditor({ workout, mode, onChange }) {
       { label: entry.notes ? 'Edit note' : 'Add a note', icon: 'note', onSelect: () => editNote(entry) },
       pos > 0 && { label: 'Move up', icon: 'up', onSelect: () => move(pos, -1) },
       pos < workout.exercises.length - 1 && { label: 'Move down', icon: 'down', onSelect: () => move(pos, 1) },
+      ...supersetActions(entry, pos),
       { label: 'Swap for another exercise', icon: 'swap', onSelect: () => pickExercise({ title: 'Swap exercise', onPick: (ex) => { entry.exerciseId = ex.id; entry.name = ex.name; changed(); redraw(entry); } }) },
       { label: 'Remove exercise', icon: 'trash', danger: true, onSelect: async () => {
         const logged = entry.sets.some((s) => s.done);
         if (logged && !(await confirmDialog({ title: `Remove ${entry.name}?`, message: 'The sets you logged for it in this workout will be removed.', confirmLabel: 'Remove exercise', danger: true }))) return;
         workout.exercises.splice(workout.exercises.indexOf(entry), 1);
+        normalizeSupersets(workout.exercises);
         changed();
         drawAll();
       } },
