@@ -133,11 +133,25 @@ async function offerLocalImport() {
 ctx.importLocalData = importLocalData;
 ctx.importDeclined = () => importFlag() === 'declined';
 
-async function closeApp({ keepLocal = true } = {}) {
-  if (ctx.sync) { ctx.sync.stop(); ctx.sync = null; }
-  if (!keepLocal) { try { await store.flush(); await store.db.clear(); localStorage.removeItem(store._mirrorKey()); } catch { /* ignore */ } }
-  currentUserId = null;
-  ctx.user = null;
+const withDeadline = (promise, ms, label) => Promise.race([
+  promise,
+  new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out`)), ms)),
+]);
+
+/** Remove this account's copy from the device (used at sign-out when everything is uploaded). */
+async function wipeLocal() {
+  try { await withDeadline(store.flush(), 2000, 'flush'); } catch { /* ignore */ }
+  try { await withDeadline(store.db.clear(), 3000, 'clear'); } catch { /* ignore */ }
+  try { localStorage.removeItem(store._mirrorKey()); } catch { /* ignore */ }
+}
+
+/**
+ * Start over from a fresh page load. Signing in, signing out and finishing a
+ * password reset all end here, so the app only ever opens one way: at startup.
+ */
+function restart() {
+  try { history.replaceState(null, '', `${location.pathname}#home`); } catch { /* ignore */ }
+  location.reload();
 }
 
 async function boot() {
@@ -149,7 +163,7 @@ async function boot() {
   ctx.mode = 'cloud';
   let client;
   try {
-    client = await getClient();
+    client = await withDeadline(getClient(), 12000, 'Loading the sign-in library');
   } catch (err) {
     // The sign-in library could not load (no connection on first launch).
     const remembered = rememberedUser();
@@ -158,69 +172,68 @@ async function boot() {
     return;
   }
   ctx.client = client;
+  let booted = false;
+
   ctx.onSignOut = async ({ keepLocal }) => {
-    await closeApp({ keepLocal });
+    if (ctx.sync) { ctx.sync.stop(); ctx.sync = null; }
+    if (!keepLocal) await wipeLocal();
     rememberUser(null);
-    await client.auth.signOut();
-    try { history.replaceState(null, '', '#home'); } catch { /* ignore */ } // the next sign-in starts on Home
-    showAuth(client);
+    currentUserId = null;
+    try { await withDeadline(client.auth.signOut(), 6000, 'Sign-out'); } catch { /* the local session is cleared below either way */ }
+    try { await withDeadline(client.auth.signOut({ scope: 'local' }), 3000, 'Sign-out'); } catch { /* ignore */ }
+    restart();
   };
 
-  const finishRecovery = async () => {
-    recovering = false;
-    const { data } = await client.auth.getSession();
-    if (!data || !data.session) { showAuth(client, { message: 'Password saved. Sign in with your new password.' }); return; }
-    rememberUser(data.session.user);
-    if (data.session.user.id !== currentUserId) await openApp(data.session.user); else hideAuth();
-    toast('Password updated');
-  };
+  const finishRecovery = async () => { recovering = false; restart(); };
+
   client.auth.onAuthStateChange((event, session) => {
     // Never do async Supabase work inside this callback; defer it.
-    setTimeout(async () => {
+    setTimeout(() => {
       if (event === 'PASSWORD_RECOVERY') {
         recovering = true;
         showNewPassword(client, finishRecovery);
         return;
       }
-      if (recovering) return;
-      if (session && session.user && session.user.id !== currentUserId) {
-        rememberUser(session.user);
-        await openApp(session.user);
-      } else if (!session && event === 'SIGNED_OUT' && currentUserId) {
-        await closeApp();
-        showAuth(client, { message: 'You have been signed out.' });
-      }
+      if (recovering || !booted) return;
+      const userId = session && session.user ? session.user.id : null;
+      // Signed in (here or in another tab) as someone other than who is on screen, or signed out elsewhere.
+      if ((userId && userId !== currentUserId) || (!userId && event === 'SIGNED_OUT' && currentUserId)) restart();
     }, 0);
   });
 
   let session = null;
   let sessionError = null;
   try {
-    const { data, error } = await client.auth.getSession();
+    const { data, error } = await withDeadline(client.auth.getSession(), 8000, 'Checking your sign-in');
     session = data ? data.session : null;
     sessionError = error || null;
   } catch (err) { session = null; sessionError = err; }
 
-  if (session && session.user) {
-    if (recovering) { showNewPassword(client, finishRecovery); return; } // arrived from a reset link
-    if (session.user.id !== currentUserId) { rememberUser(session.user); await openApp(session.user); }
-    return;
+  try {
+    if (session && session.user) {
+      if (recovering) { showNewPassword(client, finishRecovery); return; } // arrived from a reset link
+      rememberUser(session.user);
+      await openApp(session.user);
+      return;
+    }
+    if (recovering) recovering = false; // the reset link was invalid or expired; fall through to sign-in
+    const remembered = rememberedUser();
+    if (remembered && (navigator.onLine === false || sessionError)) {
+      // Signed in before, but the session cannot be refreshed right now (no signal):
+      // keep working from the copy on this device and reconnect as soon as possible.
+      await openApp(remembered, { offline: true });
+      const reconnect = async () => {
+        try { const { data } = await withDeadline(client.auth.getSession(), 8000, 'Reconnecting'); if (data && data.session) location.reload(); } catch { /* still offline */ }
+      };
+      window.addEventListener('online', reconnect);
+      setInterval(reconnect, 30000);
+      return;
+    }
+    const linkExpired = /error_code=otp_expired|error=access_denied/.test(location.hash);
+    showAuth(client, linkExpired ? { message: 'That reset link has expired or was already used. Request a new one below.' } : {});
+  } finally {
+    booted = true;
   }
-  if (recovering) recovering = false; // the reset link was invalid or expired; fall through to sign-in
-  const remembered = rememberedUser();
-  if (remembered && !currentUserId && (navigator.onLine === false || sessionError)) {
-    // Signed in before, but the session cannot be refreshed right now (no signal):
-    // keep working from the copy on this device and reconnect as soon as possible.
-    await openApp(remembered, { offline: true });
-    const reconnect = async () => {
-      try { const { data } = await client.auth.getSession(); if (data && data.session) location.reload(); } catch { /* still offline */ }
-    };
-    window.addEventListener('online', reconnect);
-    setInterval(reconnect, 30000);
-    return;
-  }
-  const linkExpired = /error_code=otp_expired|error=access_denied/.test(location.hash);
-  if (!currentUserId && !recovering) showAuth(client, linkExpired ? { message: 'That reset link has expired or was already used. Request a new one below.' } : {});
 }
 
 boot().catch((err) => {

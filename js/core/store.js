@@ -3,7 +3,7 @@
 // sync.js later pushes dirty documents to the cloud. The app therefore keeps
 // working with no signal, and nothing is lost if a request fails halfway.
 
-import { openDocs } from './idb.js';
+import { openDocs, memoryDocs } from './idb.js';
 import { buildIndex } from './calc.js';
 import { BUILT_IN, STARTER_TEMPLATES } from './exercises.js';
 
@@ -43,13 +43,28 @@ class Store {
 
   /** Open the private local database for one user. Each account gets its own database on the device. */
   async init(userId) {
-    if (this.db) { try { await this._pending; } catch { /* ignore */ } this.db.close(); }
+    const name = `ironlog-${userId || 'local'}`;
+    if (!(this.db && this._dbName === name && this.db.persistent)) {
+      if (this.db) { try { this.db.close(); } catch { /* ignore */ } }
+      this.db = await openDocs(name);
+      this._dbName = name;
+    }
+    this._pending = Promise.resolve();
     this.userId = userId || 'local';
     this.records = new Map();
     this._index.clear();
-    this.db = await openDocs(`ironlog-${this.userId}`);
+    let rows;
+    try { rows = await this.db.all(); }
+    catch (err) {
+      // Storage opened but will not answer: carry on in memory rather than freeze.
+      console.error('Local storage is not responding', err);
+      try { this.db.close(); } catch { /* ignore */ }
+      this.db = memoryDocs(err);
+      this._dbName = null;
+      rows = [];
+    }
     this.persistent = this.db.persistent;
-    for (const rec of await this.db.all()) this.records.set(rec.key, rec);
+    for (const rec of rows) this.records.set(rec.key, rec);
     this._recoverActiveMirror();
     this.ready = true;
     this._bump();

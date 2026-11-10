@@ -1,12 +1,12 @@
 // Service worker: makes the app open instantly and work with no signal.
 //
-// Strategy: serve app files from the cache right away and refresh them in the
-// background, so the next launch has the newest version. Requests to the
-// database (Supabase) are never cached or intercepted.
+// Strategy: fetch app files from the network when there is signal (so phones run
+// the newest build) and fall back to the saved copy when there is not. Requests
+// to the database (Supabase) are never cached or intercepted.
 //
-// Bump VERSION whenever you deploy changes, so phones pick up the new files.
+// Bump VERSION (and js/version.js) whenever you deploy changes.
 
-const VERSION = 'ironlog-v3';
+const VERSION = 'ironlog-v5';
 
 const SHELL = [
   './',
@@ -15,6 +15,7 @@ const SHELL = [
   './manifest.webmanifest',
   './css/app.css',
   './js/main.js',
+  './js/version.js',
   './js/lib/dom.js',
   './js/lib/format.js',
   './js/core/calc.js',
@@ -56,6 +57,18 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Ask the network first (so a phone always runs the newest build when it has signal),
+// but give up after a few seconds and use the saved copy — which is also what makes
+// the app open with no signal at all.
+const NETWORK_WAIT_MS = 3000;
+
+function fromNetwork(req, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+    fetch(req).then((res) => { clearTimeout(timer); resolve(res); }, (err) => { clearTimeout(timer); reject(err); });
+  });
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
@@ -63,37 +76,35 @@ self.addEventListener('fetch', (event) => {
   const sameOrigin = url.origin === self.location.origin;
   if (!sameOrigin && !CACHEABLE_HOSTS.includes(url.hostname)) return; // e.g. Supabase: always straight to the network
 
-  // config.js decides whether accounts are on, so always try the network first for it.
-  if (sameOrigin && url.pathname.endsWith('/config.js')) {
-    event.respondWith((async () => {
-      const cache = await caches.open(VERSION);
-      try {
-        const res = await fetch(req, { cache: 'no-store' });
-        if (res.ok) cache.put(req, res.clone()).catch(() => {});
-        return res;
-      } catch {
-        return (await cache.match(req)) || new Response('', { status: 503 });
-      }
-    })());
-    return;
-  }
-
   event.respondWith((async () => {
     const cache = await caches.open(VERSION);
-    const cached = await cache.match(req, { ignoreSearch: sameOrigin && req.mode === 'navigate' });
-    const refresh = fetch(req)
-      .then((res) => {
+    const cached = () => cache.match(req, { ignoreSearch: sameOrigin && req.mode === 'navigate' });
+
+    // Fonts and the sign-in library never change for a given address: saved copy first.
+    if (!sameOrigin) {
+      const hit = await cached();
+      if (hit) return hit;
+      try {
+        const res = await fetch(req);
         if (res && (res.ok || res.type === 'opaque')) cache.put(req, res.clone()).catch(() => {});
         return res;
-      })
-      .catch(() => null);
-    if (cached) { event.waitUntil(refresh); return cached; }
-    const fresh = await refresh;
-    if (fresh) return fresh;
-    if (req.mode === 'navigate') {
-      const shell = await cache.match('./index.html');
-      if (shell) return shell;
+      } catch { return new Response('Offline', { status: 503, statusText: 'Offline' }); }
     }
-    return new Response('Offline', { status: 503, statusText: 'Offline' });
+
+    // The app's own files: network first.
+    try {
+      const res = await fromNetwork(req, NETWORK_WAIT_MS);
+      if (res && res.ok) cache.put(req, res.clone()).catch(() => {});
+      if (res && (res.ok || res.status < 500)) return res;
+      throw new Error(`HTTP ${res ? res.status : 0}`);
+    } catch {
+      const hit = await cached();
+      if (hit) return hit;
+      if (req.mode === 'navigate') {
+        const shell = await cache.match('./index.html');
+        if (shell) return shell;
+      }
+      return new Response('Offline', { status: 503, statusText: 'Offline' });
+    }
   })());
 });

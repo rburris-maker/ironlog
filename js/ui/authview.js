@@ -3,6 +3,15 @@
 import { h, clear, segmented } from '../lib/dom.js';
 import { APP_NAME } from '../../config.js';
 import { friendlyAuthError } from '../core/auth.js';
+import { APP_VERSION } from '../version.js';
+
+/** Signed in: reload into the app. (The app always opens from a fresh page load.) */
+function enterApp() {
+  try { history.replaceState(null, '', `${location.pathname}#home`); } catch { /* ignore */ }
+  location.reload();
+}
+
+const versionLine = () => h('p', { class: 'version' }, `Version ${APP_VERSION}`);
 
 /** Wrap a password input with a Show / Hide button, so a typo can be seen before it is saved. */
 export function passwordField(input) {
@@ -36,6 +45,8 @@ export function showAuth(client, { message = '' } = {}) {
       if (submit.disabled) return;
       submit.disabled = true;
       say(mode === 'reset' ? 'Sending…' : mode === 'signup' ? 'Creating your account…' : 'Signing in…');
+      // If the request never comes back, don't leave the screen frozen: reload and let startup sort it out.
+      const slow = setTimeout(() => { say('This is taking longer than usual. Reloading…'); setTimeout(enterApp, 800); }, 15000);
       try {
         if (mode === 'reset') {
           const { error } = await client.auth.resetPasswordForEmail(email.value.trim(), { redirectTo: location.origin + location.pathname });
@@ -45,13 +56,18 @@ export function showAuth(client, { message = '' } = {}) {
           const { data, error } = await client.auth.signUp({ email: email.value.trim(), password: password.value });
           if (error) throw error;
           if (!data.session) say('Almost done — open the confirmation link we just emailed you, then sign in.', 'good');
+          else { say('Account created. Opening your log…', 'good'); enterApp(); return; }
         } else {
           const { error } = await client.auth.signInWithPassword({ email: email.value.trim(), password: password.value });
           if (error) throw error;
+          say('Signed in. Opening your log…', 'good');
+          enterApp();
+          return;
         }
       } catch (err) {
         say(friendlyAuthError(err), 'bad');
       } finally {
+        clearTimeout(slow);
         submit.disabled = false;
       }
     };
@@ -67,7 +83,8 @@ export function showAuth(client, { message = '' } = {}) {
         status),
       mode === 'reset'
         ? h('button', { class: 'link', type: 'button', onClick: () => { mode = 'signin'; draw(''); } }, 'Back to sign in')
-        : h('button', { class: 'link', type: 'button', onClick: () => { mode = 'reset'; draw(''); } }, 'Forgot your password?')));
+        : h('button', { class: 'link', type: 'button', onClick: () => { mode = 'reset'; draw(''); } }, 'Forgot your password?'),
+      versionLine()));
   };
   draw();
 }

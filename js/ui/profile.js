@@ -5,6 +5,7 @@ import { fmtDate, fmtTime, plural } from '../lib/format.js';
 import { store } from '../core/store.js';
 import { E1RM_MAX_REPS } from '../core/calc.js';
 import { APP_NAME } from '../../config.js';
+import { APP_VERSION } from '../version.js';
 import { registerScreen, screenHeader, ctx } from './app.js';
 import { REST_PRESETS } from './rest.js';
 import { passwordField } from './authview.js';
@@ -134,7 +135,7 @@ function renderProfile(el) {
     h('section', { class: 'block' },
       h('h2', { class: 'block-title' }, 'How records are calculated'),
       h('p', { class: 'note' }, `Only sets you check off count. Estimated 1RM uses the Epley formula, weight × (1 + reps ÷ 30), from sets of 1–${E1RM_MAX_REPS} reps, and is always labelled “est.” so it is never confused with a lift you actually completed. Your first session of an exercise sets the baseline; records are recalculated from your saved workouts every time one is added, edited or deleted.`)),
-    h('p', { class: 'muted small center' }, `${APP_NAME}`));
+    h('p', { class: 'muted small center' }, `${APP_NAME}, version ${APP_VERSION}`));
 }
 
 registerScreen('profile', renderProfile);
