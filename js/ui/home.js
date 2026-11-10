@@ -11,6 +11,7 @@ import { barChart } from './charts.js';
 import { renderWorkoutDetail, workoutRow } from './history.js';
 import { recoverySummary } from './body.js';
 import { openBody } from './progress.js';
+import { groupsBlock } from './groups.js';
 
 function syncBadge() {
   if (ctx.mode !== 'cloud') return null;
@@ -51,7 +52,7 @@ function renderHome(el) {
     stat(String(thisWeek), 'this week')));
 
   if (!workouts.length) {
-    add(el, h('div', { class: 'empty' },
+    add(el, groupsBlock(), h('div', { class: 'empty' },
       h('p', { class: 'empty-title' }, 'Your log starts with the first set'),
       h('p', null, 'Start a workout, check off sets as you go, and next time your previous numbers will be waiting beside every exercise.')));
     return;
@@ -70,6 +71,8 @@ function renderHome(el) {
           sum.prs.length > 0 && h('span', { class: 'accent' }, h('strong', null, String(sum.prs.length)), sum.prs.length === 1 ? ' record' : ' records')),
         h('span', { class: 'list-sub' }, summarizeExercises(last, 4))),
       h('button', { class: 'btn btn-outline', 'data-action': 'repeat-last', onClick: () => repeatWorkout(last) }, icon('repeat', 18), 'Repeat'))));
+
+  add(el, groupsBlock());
 
   add(el, recoverySummary(() => openBody('recovery')));
 

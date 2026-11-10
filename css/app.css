@@ -559,6 +559,32 @@ i.lv-none { background: var(--surface-2); border: 1.5px dashed #5a5a5a; }
 .recov-line .swatch { align-self: flex-start; margin-top: 5px; }
 .recov-line strong { flex: none; color: var(--text); font-weight: 800; }
 
+/* ── Groups ─────────────────────────────────────────────────────────────── */
+
+.invite { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: var(--surface); border-left: 4px solid var(--accent); }
+.invite-text { display: flex; flex-direction: column; min-width: 0; }
+.invite-text span { font-size: 12.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.invite-code { font-family: var(--font-num); font-size: 30px; font-weight: 700; letter-spacing: 0.12em; line-height: 1.1; user-select: all; -webkit-user-select: all; }
+.code-field { font-family: var(--font-num); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+.code-field::placeholder { letter-spacing: 0.14em; }
+
+.board-row { align-items: center; color: inherit; }
+.dots { display: flex; align-items: center; gap: 5px; margin-top: 6px; }
+.dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--surface-3); }
+.dots i.on { background: var(--accent); border-color: var(--accent); }
+.dots small { color: var(--muted); font-size: 12.5px; font-weight: 700; }
+.live-tag { font-size: 11.5px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent-ink); background: var(--accent); padding: 2px 7px; transform: skewX(-10deg); }
+
+.post-note { border-left: 4px solid var(--surface-3); padding: 4px 0 4px 12px; color: var(--text); font-style: italic; }
+.result-row { align-items: flex-start; }
+.result-line { display: block; color: var(--muted); font-size: 14px; white-space: normal; }
+.result-line b { color: var(--text); font-weight: 700; }
+
+.shared-sets { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.shared-sets li { display: flex; align-items: center; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.shared-sets strong { font-family: var(--font-num); font-size: 21px; font-weight: 700; }
+.shared-n { width: 22px; color: var(--faint); font-weight: 700; text-align: center; }
+
 /* ── Small phones, wider screens, motion preferences ────────────────────── */
 
 @media (max-width: 359px) {

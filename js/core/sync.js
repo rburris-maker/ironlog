@@ -35,6 +35,7 @@ const TABLES = [
       started_at: d.startedAt, ended_at: d.endedAt || null, duration_seconds: d.durationSec ?? null,
       timer: d.timer || null, template_id: d.templateId || null, repeated_from_id: d.repeatedFromId || null,
       notes: d.notes || '', exercises: d.exercises || [],
+      group_post_id: d.groupPostId || null, highlights: d.highlights || null,
       created_at: d.createdAt, updated_at: d.updatedAt, deleted_at: d.deletedAt || null,
     }),
     fromRow: (r) => ({
@@ -42,6 +43,7 @@ const TABLES = [
       startedAt: iso(r.started_at), endedAt: iso(r.ended_at), durationSec: r.duration_seconds,
       timer: r.timer || null, templateId: r.template_id || null, repeatedFromId: r.repeated_from_id || null,
       notes: r.notes || '', exercises: r.exercises || [],
+      ...(r.group_post_id ? { groupPostId: r.group_post_id } : {}), ...(r.highlights ? { highlights: r.highlights } : {}),
       createdAt: iso(r.created_at), updatedAt: iso(r.updated_at), deletedAt: iso(r.deleted_at),
     }),
   },

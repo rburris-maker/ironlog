@@ -190,6 +190,7 @@ function editPage(id) {
       tidy(draft, { countFilled: true });
       st.saved = true;
       store.saveWorkout(draft);
+      store.refreshHighlights(draft.id);
       popPage();
       toast('Workout updated — records recalculated');
     };

@@ -8,6 +8,7 @@ import { GROUPS } from '../core/exercises.js';
 import { pushPage, popPage, registerScreen, pageHeader, screenHeader, refresh } from './app.js';
 import { startFromTemplate, summarizeExercises } from './active.js';
 import { pickExercise, createExercise, pickDuration, editMuscles } from './pickers.js';
+import { renderGroupsTab } from './groups.js';
 import { openExerciseProgress } from './progress.js';
 
 let tab = 'templates';
@@ -16,8 +17,8 @@ let exQuery = '';
 function renderWorkouts(el) {
   add(el, 
     screenHeader('Workouts'),
-    segmented([{ id: 'templates', label: 'Templates' }, { id: 'exercises', label: 'Exercises' }], tab, (id) => { tab = id; refresh(); }, { label: 'Workouts section' }));
-  if (tab === 'templates') renderTemplates(el); else renderExercises(el);
+    segmented([{ id: 'templates', label: 'Templates' }, { id: 'exercises', label: 'Exercises' }, { id: 'groups', label: 'Groups' }], tab, (id) => { tab = id; refresh(); }, { label: 'Workouts section' }));
+  if (tab === 'templates') renderTemplates(el); else if (tab === 'groups') renderGroupsTab(el); else renderExercises(el);
 }
 
 // ---------- templates ----------

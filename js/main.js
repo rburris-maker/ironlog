@@ -15,6 +15,7 @@ import './ui/workouts.js';
 import './ui/history.js';
 import './ui/progress.js';
 import './ui/profile.js';
+import { consumeJoinLink } from './ui/groups.js';
 
 let started = false;
 let currentUserId = null;
@@ -84,6 +85,8 @@ async function openApp(user, { offline = false } = {}) {
     });
     ctx.sync.start();
   }
+  // someone arrived through an invite link: offer to join once the app is open
+  if (!recovering) setTimeout(consumeJoinLink, 400);
   if (!store.persistent) toast('This browser is blocking storage, so data will not be kept after you close the page.', { duration: 7000 });
 }
 

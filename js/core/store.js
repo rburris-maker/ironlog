@@ -277,6 +277,42 @@ class Store {
   /** Muscles an exercise works: { primary, secondary }. Unknown exercises work nothing. */
   musclesFor(id) { return musclesOf(this.exercise(id)); }
 
+  /**
+   * Make a list of exercise entries from someone else usable here. Their custom exercises
+   * do not exist in this library, so each is matched to one of mine by name or created.
+   * Returns new entries with this account's exercise IDs.
+   */
+  adoptExercises(entries) {
+    return (entries || []).map((e) => {
+      if (this.exercise(e.exerciseId)) return { ...e };
+      const name = String(e.name || 'Exercise').trim() || 'Exercise';
+      const c = e.custom || {};
+      const mine = this.exercises().find((x) => x.name.toLowerCase() === name.toLowerCase())
+        || this.addExercise(name, c.group || 'Other', c.muscles && Array.isArray(c.muscles.primary) ? c.muscles.primary : null);
+      return { ...e, exerciseId: mine.id, name: mine.name };
+    });
+  }
+
+  /**
+   * Save the records a finished workout earned onto the workout itself, so a group
+   * can be shown them. Records are still calculated from history; this is a copy
+   * taken when the workout is finished or edited.
+   */
+  refreshHighlights(id) {
+    const w = this.get('workout', id);
+    if (!w || w.status !== 'completed' || w.deletedAt) return;
+    const unit = this.prefs.unit;
+    const sum = this.index(unit).byWorkout.get(id);
+    const prs = (sum ? sum.prs : []).slice(0, 12).map((ev) => ({
+      type: ev.type, exerciseName: ev.exerciseName || null,
+      weight: ev.weight ?? null, reps: ev.reps ?? null, value: ev.value ?? null, previous: ev.previous ?? null,
+    }));
+    const next = prs.length ? { unit, prs } : null;
+    if (JSON.stringify(next) === JSON.stringify(w.highlights || null)) return;
+    if (next) w.highlights = next; else delete w.highlights;
+    this.put('workout', w, { silent: true });
+  }
+
   // ---------- body ----------
 
   /** Latest bodyweight entry: { date, weight, unit } or null. */

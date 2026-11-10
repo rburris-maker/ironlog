@@ -441,3 +441,59 @@ test('recovery: a soreness check-in overrides the estimate from that moment on',
   assert.equal(run({ chest: { level: 'very', at: new Date(now).toISOString() } }, now + 24 * HOUR).chest.pct, 40);
   assert.equal(run({ quads: { level: 'very', at: daysAgo(9, now) } }).quads.report, null);
 });
+
+// ---------- groups ----------
+
+import { weekBoard, postExercises, describeTargets, boardSince, BOARD_WEEKS } from '../js/core/groups.js';
+
+test('group board: this week\'s count, goal, and a streak that survives an unfinished current week', () => {
+  const now = new Date('2026-11-12T12:00:00');           // a Thursday
+  const day = (offset, hour = 9) => { const d = new Date(now); d.setDate(d.getDate() + offset); d.setHours(hour, 0, 0, 0); return d.toISOString(); };
+  const members = [
+    { user_id: 'a', display_name: 'Ann', share: true, active_since: null },
+    { user_id: 'b', display_name: 'Bo', share: true, active_since: day(0, 11) },
+    { user_id: 'c', display_name: 'Cy', share: false },
+    { user_id: 'd', display_name: 'Di', share: true },
+  ];
+  const w = (user_id, offset) => ({ user_id, started_at: day(offset) });
+  const workouts = [
+    // Ann: 2 this week (Mon, Wed), 2 last week, 2 the week before, 1 three weeks back
+    w('a', -3), w('a', -1), w('a', -8), w('a', -10), w('a', -15), w('a', -17), w('a', -22),
+    // Bo: 1 this week, 2 last week
+    w('b', -2), w('b', -9), w('b', -7),
+    // a workout by someone who left the group is ignored
+    w('z', -1),
+  ];
+  const rows = Object.fromEntries(weekBoard({ members, workouts, goal: 2, now }).map((r) => [r.name, r]));
+  assert.equal(rows.Ann.count, 2);
+  assert.equal(rows.Ann.met, true);
+  assert.equal(rows.Ann.streak, 3);                       // this week + the two before; three weeks back missed
+  assert.equal(rows.Bo.count, 1);
+  assert.equal(rows.Bo.met, false);
+  assert.equal(rows.Bo.streak, 1);                        // last week counted; this week is still open, so it is not broken
+  assert.ok(rows.Bo.activeSince);
+  assert.equal(rows.Di.count, 0);
+  assert.equal(rows.Di.streak, 0);
+  assert.equal(rows.Di.last, null);
+  assert.equal(rows.Cy.share, false);
+  // order: most workouts this week first; members who are not sharing last
+  assert.deepEqual(weekBoard({ members, workouts, goal: 2, now }).map((r) => r.name), ['Ann', 'Bo', 'Di', 'Cy']);
+  // the board asks the server for eight Monday-to-Sunday weeks
+  const since = boardSince(now);
+  assert.equal(since.getDay(), 1);
+  assert.equal(Math.floor((now - since) / 86400000), (BOARD_WEEKS - 1) * 7 + 3); // Monday 00:00, seven weeks before this week
+});
+
+test('posting a routine to a group leaves weights out and describes custom exercises', () => {
+  const tpl = { name: 'Push', unit: 'lb', exercises: [
+    { uid: 'x', exerciseId: 'bench-press', name: 'Bench Press', supersetId: 's1', sets: [{ weight: 185, reps: 8 }, { weight: 185, reps: 8 }, { weight: 135, reps: null, amrap: true, seconds: 60 }] },
+    { uid: 'y', exerciseId: 'c0ffee', name: 'Sled Drag', sets: [] },
+  ] };
+  const out = postExercises(tpl, (id) => (id === 'c0ffee' ? { group: 'Legs', muscles: { primary: ['quads'], secondary: [] } } : null));
+  assert.deepEqual(out[0], { uid: 'p1', exerciseId: 'bench-press', name: 'Bench Press', supersetId: 's1', sets: [{ weight: null, reps: 8 }, { weight: null, reps: 8 }, { weight: null, reps: null, amrap: true, seconds: 60 }] });
+  assert.deepEqual(out[1].custom, { group: 'Legs', muscles: { primary: ['quads'], secondary: [] } });
+  assert.deepEqual(out[1].sets, [{ weight: null, reps: null }]);
+  assert.equal(describeTargets(out[0].sets), '2 × 8, 1 × AMRAP 60s');
+  assert.equal(describeTargets(out[1].sets), '1 set');
+  assert.equal(describeTargets([{ reps: 5 }, { reps: 5 }, { reps: 3 }]), '2 × 5, 1 × 3');
+});

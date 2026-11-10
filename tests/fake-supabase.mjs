@@ -45,6 +45,23 @@ export function createServer() {
         u.password = req.password;
         return { data: {} };
       }
+      if (req.op === 'rpc') {
+        // Like PostgREST: call the function as the signed-in user; a raised exception comes back as error.message.
+        if (!/^[a-z_]+$/.test(req.fn || '')) return { error: { message: 'bad function name' } };
+        if (!req.token || !uuidOk(req.token)) return { error: { message: 'JWT required' } };
+        const args = Object.entries(req.params || {}).map(([k, v]) => {
+          if (!/^[a-z_]+$/.test(k)) throw new Error('bad parameter name');
+          if (v === null || v === undefined) return `${k} => null`;
+          const text = (typeof v === 'object' ? JSON.stringify(v) : String(v)).replace(/\$a\$/g, '');
+          return `${k} => $a$${text}$a$`;
+        });
+        try {
+          return { data: JSON.parse(sql(asUser(req.token, `select public.${req.fn}(${args.join(', ')})`))) };
+        } catch (err) {
+          const m = /ERROR:\s+(.*)/.exec(String(err.stderr || err.message));
+          return { error: { message: m ? m[1].trim() : 'rpc failed' } };
+        }
+      }
       if (!(req.table in TABLES)) return { error: { message: `unknown table ${req.table}` } };
       if (!req.token || !uuidOk(req.token)) return { error: { message: 'JWT required' } };
 
@@ -104,6 +121,7 @@ export const CLIENT_SCRIPT = `
   const fromRecoveryLink = /type=recovery/.test(location.hash);
   window.__IRONLOG_TEST_CLIENT__ = {
     from,
+    rpc(fn, params) { return call({ op: 'rpc', fn, params }); },
     auth: {
       async getSession() { return { data: { session: session() }, error: null }; },
       onAuthStateChange(fn) {

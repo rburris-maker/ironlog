@@ -112,6 +112,7 @@ tests/                  unit, browser end-to-end and database tests
 | Table | One row is | Key columns |
 |---|---|---|
 | `profiles` | a user's preferences | `user_id`, `prefs` (unit, rest timer…) |
+| `groups`, `group_members`, `group_posts` | groups, who is in them, and workouts posted to them | reachable only through the group functions |
 | `exercises` | a custom exercise | `id`, `user_id`, `name`, `muscle_group`, `muscles` (which muscles it works) |
 | `templates` | a reusable routine | `id`, `user_id`, `name`, `exercises` (JSON: order + target sets) |
 | `workouts` | one workout session | `id`, `user_id`, `name`, `status`, `started_at`, `duration_seconds`, `exercises` (JSON: sets, weights, reps, notes), `repeated_from_id` |
@@ -161,6 +162,16 @@ Progress → Body shows a front/back muscle map with two views. Both are calcula
 - **Strength.** Each muscle takes the level of your best lift that trains it directly (last 6 months): estimated 1RM ÷ bodyweight on the day of the lift, compared with the bodyweight-ratio standards published by [Strength Level](https://strengthlevel.com/strength-standards) (Beginner, Novice, Intermediate, Advanced, Elite — stronger than 5 / 20 / 50 / 80 / 95% of lifters). The ratios for the 15 rated lifts are in `STANDARDS`; the score is 20 points per level with straight lines between. Bodyweight and the men's/women's table are set in Profile and kept in `profiles.prefs`. Forearms, abs and calves have no standard and are not rated.
 - **Recovery.** An estimate, not a measurement. Every checked-off set adds load to the exercise's primary muscles (assisting muscles half; warm-ups less; AMRAP sets more). Load halves every 24 hours; ten hard sets = 100%. 60% and up is "needs rest", under 25% is "fresh". Tapping a muscle lets the user say how it actually feels, which overrides the estimate from that moment. The constants are in `RECOVERY`.
 - The muscles each built-in exercise works are listed in `js/core/exercises.js`; custom exercises choose theirs when created.
+
+### Groups (`js/core/groups.js`, `js/ui/groups.js`, last section of `supabase/schema.sql`)
+
+A group is a set of accounts that share workouts with each other: created from Home or Workouts → Groups, joined with a six-character code or an invite link (`…/#join=CODE`).
+
+- **Weekly board.** Each sharing member's workouts this week against the group's weekly goal, their streak of weeks at goal, and a "working out now" marker.
+- **Group workouts.** Any member can post one of their routines (exercises, sets and reps — weights are left out). Members start it from the group; their finished session is linked to the post (`workouts.group_post_id`) and appears on its results board, whenever they train.
+- **Feed.** Workouts members finish after joining, with exercises, sets, weights, reps, time and records. Any of them can be opened and repeated.
+- **Privacy.** The three group tables have row-level security with no policies, so the app cannot touch them directly; everything goes through `security definer` functions that check the caller is signed in and a member. Members see only workouts finished after the author joined and while the author's sharing switch is on. Notes, bodyweight, soreness, strength ratings, templates and email are never shared. `tests/db/groups.test.sql` checks all of this against a real database.
+- Group data is fetched when a group screen opens (it is not stored offline); a member's own logging still works with no signal.
 
 ## Tests
 

@@ -10,6 +10,7 @@ import { go, pushPage, registerScreen, currentRoute } from './app.js';
 import { workoutEditor } from './editor.js';
 import { rest, openRestSheet } from './rest.js';
 import { currentRecovery, stillRecovering } from './body.js';
+import { groupsChanged } from './groupstate.js';
 
 const nameOf = (id, fallback) => store.exerciseName(id, fallback);
 
@@ -40,6 +41,21 @@ async function begin(workout) {
 export const startBlank = () => begin(blankWorkout(store.prefs));
 export const startFromTemplate = (tpl) => begin(workoutFromTemplate(tpl, store.prefs, nameOf));
 export const repeatWorkout = (src) => begin(workoutFromPrevious(src, store.prefs, nameOf));
+
+/** Start a workout someone posted to a group. The result is linked to the post so it shows on its results board. */
+export function startFromGroupPost(post) {
+  const w = workoutFromTemplate({ id: null, name: post.name, unit: post.unit, exercises: store.adoptExercises(post.exercises) }, store.prefs, nameOf);
+  w.templateId = null;
+  w.groupPostId = post.id;
+  return begin(w);
+}
+
+/** Start my own session from the exercise list of a workout another member shared. */
+export function startFromShared(template) {
+  const w = workoutFromTemplate({ ...template, id: null, exercises: store.adoptExercises(template.exercises) }, store.prefs, nameOf);
+  w.templateId = null;
+  return begin(w);
+}
 
 /** "Start workout" sheet: blank, a saved template, or repeat a previous workout. */
 export function openStartSheet() {
@@ -112,6 +128,8 @@ function finishFlow(w) {
     try {
       finishWorkout(w, { countFilled });
       store.saveWorkout(w);
+      store.refreshHighlights(w.id);
+      groupsChanged();
       rest.stop();
       close();
       go('home');

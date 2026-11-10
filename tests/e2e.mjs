@@ -908,6 +908,211 @@ if (WITH_DB) {
     await context.close();
   });
 
+  // ---------- groups ----------
+  const gDev = await device();
+  const hDev = await device();
+  const iDev = await device();
+  let g, hk, groupId, code;
+  const refreshGroup = async (page) => {
+    const before = await page.getAttribute('[data-action="group-refresh"]', 'data-loaded');
+    await page.click('[data-action="group-refresh"]');
+    await page.waitForFunction((was) => { const b = document.querySelector('[data-action="group-refresh"]'); return b && !b.disabled && b.dataset.loaded !== was && b.dataset.loaded !== '0'; }, before);
+  };
+  const member = (page, name) => page.locator(`.board-row[data-member="${name}"]`);
+
+  await step('Groups: a member creates a group and gets an invite code; an outsider sees nothing', async () => {
+    g = await open(gDev);
+    await signUp(g, 'gina@example.com');
+    await synced(g);
+    await g.waitForSelector('[data-block="groups"] [data-action="group-create"]');
+    await g.click('[data-action="group-create"]');
+    await g.fill('[data-form="group-create"] input[name="group-name"]', 'Morning Crew');
+    assert.equal(await g.inputValue('[data-form="group-create"] input[name="display-name"]'), 'Gina', 'name is suggested from the email');
+    await g.click('[data-form="group-create"] button[type="submit"]');
+    await g.waitForSelector('[data-invite-code]');
+    code = await g.getAttribute('[data-invite-code]', 'data-invite-code');
+    assert.match(code, /^[A-Z2-9]{6}$/);
+    assert.equal(await member(g, 'Gina').getAttribute('data-count'), '0');
+    assert.match(await g.locator('[data-section="board"]').innerText(), /0 \/ 3/);
+    await shot(g, '21-group-new');
+    groupId = JSON.parse(sql(`select to_jsonb(x) from public.groups x where join_code = '${code}'`)).id;
+
+    const i = await open(iDev);
+    await signUp(i, 'ivy@example.com');
+    await synced(i);
+    assert.equal(await i.locator('[data-block="groups"] [data-group]').count(), 0, 'an outsider has no groups');
+    const denied = await i.evaluate(async (id) => {
+      const c = window.__IRONLOG_TEST_CLIENT__;
+      const a = await c.rpc('group_overview', { p_group: id, p_since: new Date(0).toISOString() });
+      const b = await c.rpc('group_post_create', { p_group: id, p_name: 'X', p_unit: 'lb', p_exercises: [{}], p_note: '' });
+      return [a.error && a.error.message, a.data, b.error && b.error.message];
+    }, groupId);
+    assert.deepEqual(denied, ['You are not in this group', null, 'You are not in this group']);
+    // a wrong code gives a clear message and joins nothing
+    await i.click('[data-action="group-join"]');
+    await i.fill('[data-form="group-join"] input[name="join-code"]', 'ZZZZZZ');
+    await i.click('[data-form="group-join"] button[type="submit"]');
+    await i.waitForSelector('.toast:has-text("No group has that code")');
+    assert.equal(Number(sql(`select count(*) from public.group_members where group_id = '${groupId}'`)), 1);
+    await i.close();
+  });
+
+  await step('Groups: an invite link survives creating an account, and joining shows both members', async () => {
+    hk = await open(hDev, `${BASE}#join=${code.toLowerCase()}`);
+    await signUp(hk, 'hank@example.com');
+    await hk.waitForSelector('[data-form="group-join"]');
+    assert.equal(await hk.inputValue('[data-form="group-join"] input[name="join-code"]'), code, 'the code from the link is filled in');
+    await hk.fill('[data-form="group-join"] input[name="display-name"]', 'Hank');
+    await hk.click('[data-form="group-join"] button[type="submit"]');
+    await hk.waitForSelector('.board-row[data-member="Hank"]');
+    assert.equal(await hk.locator('.board-row').count(), 2);
+    await refreshGroup(g);
+    assert.equal(await g.locator('.board-row').count(), 2);
+    assert.match(await g.locator('.page-title').innerText(), /Morning Crew/i);
+  });
+
+  await step('Groups: a posted workout can be done by another member, and the result reaches the group with full sets and records', async () => {
+    // Hank lifts once on his own first, so the group workout can earn a record
+    await hk.click('.page-head .icon-btn[aria-label="Back"]');
+    await startBlank(hk);
+    await renameWorkout(hk, 'Solo Bench');
+    await addExercise(hk, 'Bench Press');
+    await logSet(hk, 'Bench Press', 0, 135, 8);
+    await finish(hk);
+    await hk.click('[data-action="summary-done"]');
+
+    // Gina posts her Push Day template
+    await g.click('[data-action="post-workout"]');
+    await g.click('[data-post-template="Push Day"]');
+    await g.fill('[data-form="group-post"] input[name="post-name"]', 'Saturday Push');
+    await g.fill('[data-form="group-post"] input[name="post-note"]', 'Last set to failure');
+    await g.click('[data-form="group-post"] button[type="submit"]');
+    await g.waitForSelector('[data-post="Saturday Push"]');
+    const post = JSON.parse(sql(`select to_jsonb(p) from public.group_posts p where name = 'Saturday Push'`));
+    assert.equal(post.exercises.length, 5);
+    assert.ok(post.exercises.every((e) => e.sets.every((x) => x.weight === null)), 'weights are not posted');
+
+    // Hank finds it in the group and does it
+    await hk.click('[data-block="groups"] [data-group="Morning Crew"]');
+    await hk.waitForSelector('[data-post="Saturday Push"]');
+    await hk.click('[data-post="Saturday Push"]');
+    assert.match(await hk.locator('#view').innerText(), /Last set to failure/);
+    await hk.click('[data-action="start-post"]');
+    await hk.waitForSelector('.live-head');
+    assert.equal(await rows(hk, 'Bench Press').nth(0).locator('.set-prev').innerText(), '135 × 8', 'his own previous lift is filled in');
+    await logSet(hk, 'Bench Press', 0, 155, 8);
+    await logSet(hk, 'Bench Press', 1, 155, 6);
+    await logSet(hk, 'Overhead Press', 0, 85, 8);
+    await finish(hk);
+    await hk.click('[data-action="summary-done"]');
+    await synced(hk);
+    const row = JSON.parse(sql(`select to_jsonb(w) from public.workouts w where name = 'Saturday Push' and status = 'completed'`));
+    assert.equal(row.group_post_id, post.id, 'the workout is linked to the group post');
+    assert.ok(row.highlights && row.highlights.prs.length >= 1, 'records are saved with the workout');
+
+    // Gina sees it: the weekly board, the feed, the results board and the full workout
+    await refreshGroup(g);
+    assert.equal(await member(g, 'Hank').getAttribute('data-count'), '2');
+    assert.equal(await member(g, 'Gina').getAttribute('data-count'), '0');
+    assert.equal(await g.locator('[data-section="feed"] [data-shared]').count(), 2);
+    assert.match(await g.locator('[data-section="feed"] [data-shared="Saturday Push"]').innerText(), /Hank[\s\S]*3 sets/);
+    assert.match(await g.locator('[data-post="Saturday Push"]').innerText(), /1 result/);
+    await shot(g, '22-group');
+    await g.click('[data-post="Saturday Push"]');
+    await g.waitForSelector('[data-result-by="Hank"]');
+    const result = await g.locator('[data-result-by="Hank"]').innerText();
+    assert.match(result, /Bench Press 155 × 8, 155 × 6/);
+    assert.match(result, /Overhead Press 85 × 8/);
+    await shot(g, '23-group-results');
+    await g.click('[data-result-by="Hank"]');
+    await g.waitForSelector('[data-shared-exercise="Bench Press"]');
+    assert.equal(await g.getAttribute('[data-shared-by]', 'data-shared-by'), 'Hank');
+    assert.match(await g.locator('.pr-list').innerText(), /Bench Press[\s\S]*Heaviest lift: 155 × 8 lb/);
+    assert.equal(await g.locator('[data-shared-exercise]').count(), 2, 'exercises with no completed sets are left out');
+    await shot(g, '24-group-shared-workout');
+    // Gina's own data is untouched and she still cannot read Hank's rows directly
+    assert.equal(await data(g, (store) => store.workouts().length), 0);
+    await g.click('.page-head .icon-btn[aria-label="Back"]');
+    await g.click('.page-head .icon-btn[aria-label="Back"]');
+    await g.waitForSelector('[data-section="board"]');
+  });
+
+  await step('Groups: “working out now”, the weekly goal and streak, and switching sharing off', async () => {
+    await startBlank(hk);
+    await synced(hk);
+    await refreshGroup(g);
+    await g.waitForSelector('.board-row[data-member="Hank"] [data-live-now]');
+    await hk.click('[data-action="discard"]');
+    await hk.click('[data-confirm]');
+    await ready(hk);
+    await synced(hk);
+
+    // the owner lowers the goal to 2 a week: Hank has met it
+    await g.click('[data-action="group-menu"]');
+    await g.click('.menu-item:has-text("Group name and weekly goal")');
+    await g.selectOption('[data-form="group-settings"] select', '2');
+    await g.click('[data-form="group-settings"] button[type="submit"]');
+    await g.waitForSelector('.board-row[data-member="Hank"][data-met="true"]');
+    assert.equal(await g.locator('.board-row[data-member="Hank"] [data-live-now]').count(), 0, 'no longer working out');
+    assert.equal(await member(g, 'Hank').getAttribute('data-streak'), '1');
+    assert.match(await g.locator('[data-board-summary]').innerText(), /1 of 2 members have hit the goal/);
+    // a member cannot change group settings
+    await hk.click('[data-block="groups"] [data-group="Morning Crew"]');
+    await hk.click('[data-action="group-menu"]');
+    assert.equal(await hk.locator('.menu-item:has-text("Group name and weekly goal")').count(), 0);
+
+    // Hank switches sharing off: his workouts vanish for Gina
+    await hk.click('.menu-item:has-text("My name and sharing")');
+    await hk.uncheck('[data-form="group-me"] input[name="share"]');
+    await hk.click('[data-form="group-me"] button[type="submit"]');
+    await hk.waitForSelector('.notice:has-text("not sharing")');
+    await refreshGroup(g);
+    assert.equal(await g.locator('[data-section="feed"] [data-shared]').count(), 0);
+    assert.match(await member(g, 'Hank').innerText(), /Not sharing workouts/);
+    assert.match(await g.locator('[data-post="Saturday Push"]').innerText(), /no results yet/);
+    // …and back on
+    await hk.click('[data-action="group-menu"]');
+    await hk.click('.menu-item:has-text("My name and sharing")');
+    await hk.check('[data-form="group-me"] input[name="share"]');
+    await hk.click('[data-form="group-me"] button[type="submit"]');
+    await hk.waitForSelector('.notice:has-text("not sharing")', { state: 'detached' });
+    await refreshGroup(g);
+    assert.equal(await g.locator('[data-section="feed"] [data-shared]').count(), 2);
+  });
+
+  await step('Groups: a shared workout can be repeated by another member; leaving removes access; the last member leaving deletes the group', async () => {
+    await g.click('[data-section="feed"] [data-shared="Solo Bench"]');
+    await g.click('[data-action="do-shared"]');
+    await g.waitForSelector('.live-head');
+    assert.equal(await rows(g, 'Bench Press').count(), 1);
+    assert.equal(await rows(g, 'Bench Press').nth(0).locator('input').nth(0).inputValue(), '', 'the other member\'s weight is not copied in');
+    await g.click('[data-action="discard"]');
+    await g.click('[data-confirm]');
+    await ready(g);
+
+    await hk.click('[data-action="group-menu"]');
+    await hk.click('.menu-item:has-text("Leave group")');
+    await hk.click('[data-confirm]');
+    await hk.waitForSelector('[data-block="groups"] [data-action="group-create"]');
+    assert.equal(await hk.locator('[data-block="groups"] [data-group]').count(), 0);
+    const after = await hk.evaluate(async (id) => (await window.__IRONLOG_TEST_CLIENT__.rpc('group_overview', { p_group: id, p_since: new Date(0).toISOString() })).error.message, groupId);
+    assert.equal(after, 'You are not in this group');
+    assert.equal(await data(hk, (store) => store.workouts().length), 2, 'his own history is untouched');
+
+    await g.click('[data-block="groups"] [data-group="Morning Crew"]');
+    await g.waitForSelector('[data-section="board"]');
+    await refreshGroup(g);
+    assert.equal(await g.locator('.board-row').count(), 1);
+    await g.click('[data-action="group-menu"]');
+    await g.click('.menu-item:has-text("Leave group")');
+    await g.click('[data-confirm]');
+    await g.waitForSelector('[data-block="groups"] [data-action="group-create"]');
+    assert.equal(Number(sql(`select count(*) from public.groups where id = '${groupId}'`)), 0);
+    assert.equal(Number(sql(`select count(*) from public.group_posts where group_id = '${groupId}'`)), 0);
+    assert.equal(Number(sql(`select count(*) from public.workouts where name = 'Saturday Push'`)), 1, 'workouts outlive the group');
+  });
+
+  await gDev.close(); await hDev.close(); await iDev.close();
   await phoneA.close(); await phoneA2.close(); await phoneB.close();
 }
 
