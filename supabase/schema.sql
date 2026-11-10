@@ -87,6 +87,7 @@ create index if not exists workouts_date_idx  on public.workouts  (user_id, star
 create or replace function public.ironlog_guard_write()
 returns trigger
 language plpgsql
+set search_path = ''
 as $$
 begin
   if tg_op = 'UPDATE' then
@@ -105,6 +106,7 @@ $$;
 create or replace function public.ironlog_guard_workout()
 returns trigger
 language plpgsql
+set search_path = ''
 as $$
 begin
   if old.status = 'completed' and new.status = 'active' then
