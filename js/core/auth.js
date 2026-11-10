@@ -34,7 +34,8 @@ export function rememberedUser() {
 /** Turn Supabase's error messages into something a person can act on. */
 export function friendlyAuthError(error) {
   const m = (error && error.message) || String(error || '');
-  if (/invalid login credentials/i.test(m)) return 'That email and password don’t match an account.';
+  if (/invalid login credentials/i.test(m)) return 'That email and password don’t match an account. Tap Show to check for typos, or use “Forgot your password?” to set a new one.';
+  if (/different from the old password|same_password/i.test(m)) return 'That is already your password. Choose a different one.';
   if (/already registered|already exists/i.test(m)) return 'An account with that email already exists. Sign in instead.';
   if (/email not confirmed/i.test(m)) return 'Confirm your email first — open the link we sent you, then sign in.';
   if (/password.*(at least|should be|short)/i.test(m)) return 'Choose a password with at least 6 characters.';

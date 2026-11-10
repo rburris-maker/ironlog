@@ -639,6 +639,55 @@ if (WITH_DB) {
     await until(a2, (store) => store.workouts().length === 2 && store.index('lb').exercises.get('squat').records.heaviest.weight === 235, 'the deletion and the recalculated record reach the second device');
   });
 
+  await step('A password-reset link asks for a new password first, and the new password then works', async () => {
+    const context = await device();
+    let p = await open(context);
+    await signUp(p, 'dave@example.com');
+    await synced(p);
+    const session = await p.evaluate(() => localStorage.getItem('fake-supabase-session'));
+    await tab(p, 'profile');
+    await p.click('[data-action="sign-out"]');
+    await p.click('[data-confirm]');
+    await p.waitForSelector('.auth-form');
+    await signIn(p, 'dave@example.com', 'not-my-password');
+    await p.waitForSelector('.auth-note.bad');
+    // "open the emailed link": arrives signed in, with type=recovery in the address
+    await p.evaluate((sess) => localStorage.setItem('fake-supabase-session', sess), session);
+    await p.goto('about:blank');                       // an emailed link is always a fresh page load
+    await p.goto(`${BASE}#access_token=test&type=recovery`);
+    await p.waitForSelector('[data-new-password]');
+    await p.waitForTimeout(1500);
+    assert.ok(await p.locator('#app').isHidden(), 'the app stays hidden until a new password is chosen');
+    assert.ok(await p.locator('[data-new-password]').isVisible(), 'the new-password form is still showing');
+    const field = p.locator('[data-new-password] input');
+    await field.fill('brand-new-pass');
+    assert.equal(await field.getAttribute('type'), 'password');
+    await p.click('[data-new-password] .pw-toggle');
+    assert.equal(await field.getAttribute('type'), 'text', 'Show reveals what was typed');
+    await p.click('[data-new-password] button[type="submit"]');
+    await ready(p);
+    assert.ok(await p.locator('#auth').isHidden());
+    // old password no longer works, the new one does
+    await tab(p, 'profile');
+    await p.click('[data-action="sign-out"]');
+    await p.click('[data-confirm]');
+    await signIn(p, 'dave@example.com', 'correct-horse');
+    await p.waitForSelector('.auth-note.bad');
+    await signIn(p, 'dave@example.com', 'brand-new-pass');
+    await ready(p);
+    // change it again from Profile while signed in
+    await tab(p, 'profile');
+    await p.click('[data-action="change-password"]');
+    await p.fill('.sheet input[name="new-password"]', 'third-password');
+    await p.click('.sheet button[type="submit"]');
+    await p.waitForSelector('.toast >> text=Password updated');
+    await p.click('[data-action="sign-out"]');
+    await p.click('[data-confirm]');
+    await signIn(p, 'dave@example.com', 'third-password');
+    await ready(p);
+    await context.close();
+  });
+
   await step('Workouts logged before accounts were turned on can be moved into the account', async () => {
     const context = await browser.newContext(phone);
     let p = await open(context);                    // device-only mode first

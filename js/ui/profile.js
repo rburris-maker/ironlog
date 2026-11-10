@@ -7,6 +7,8 @@ import { E1RM_MAX_REPS } from '../core/calc.js';
 import { APP_NAME } from '../../config.js';
 import { registerScreen, screenHeader, ctx } from './app.js';
 import { REST_PRESETS } from './rest.js';
+import { passwordField } from './authview.js';
+import { friendlyAuthError } from '../core/auth.js';
 
 function syncSection() {
   if (ctx.mode !== 'cloud') {
@@ -32,7 +34,38 @@ function syncSection() {
         s.lastSyncedAt && h('span', { class: 'muted' }, `Last synced ${fmtDate(s.lastSyncedAt)} at ${fmtTime(s.lastSyncedAt)}`)))),
     h('div', { class: 'btn-row' },
       h('button', { class: 'btn btn-quiet', onClick: () => { if (ctx.sync) ctx.sync.run(); } }, icon('cloud', 18), 'Sync now'),
-      h('button', { class: 'btn btn-quiet', 'data-action': 'sign-out', onClick: signOut }, 'Sign out')));
+      h('button', { class: 'btn btn-quiet', 'data-action': 'sign-out', onClick: signOut }, 'Sign out')),
+    !ctx.offlineAuth && h('button', { class: 'btn btn-quiet btn-block', 'data-action': 'change-password', onClick: changePassword }, 'Change password'));
+}
+
+function changePassword() {
+  openSheet({
+    title: 'Change password',
+    body: (close) => {
+      const input = h('input', { class: 'field field-lg', type: 'password', name: 'new-password', autocomplete: 'new-password', placeholder: 'New password (6+ characters)', 'aria-label': 'New password', minlength: '6' });
+      const status = h('p', { class: 'auth-note', role: 'status' });
+      const submit = h('button', { class: 'btn btn-primary', type: 'submit' }, 'Save password');
+      return h('form', { class: 'auth-form', onSubmit: async (e) => {
+        e.preventDefault();
+        if (submit.disabled) return;
+        if (input.value.length < 6) { status.textContent = 'Use at least 6 characters.'; status.className = 'auth-note bad'; return; }
+        submit.disabled = true;
+        try {
+          const { error } = await ctx.client.auth.updateUser({ password: input.value });
+          if (error) throw error;
+          close();
+          toast('Password updated');
+        } catch (err) {
+          status.textContent = friendlyAuthError(err); status.className = 'auth-note bad';
+          submit.disabled = false;
+        }
+      } },
+        h('p', { class: 'sheet-text' }, 'You stay signed in on this device. Use the new password the next time you sign in anywhere.'),
+        passwordField(input),
+        status,
+        h('div', { class: 'btn-row' }, h('button', { class: 'btn btn-quiet', type: 'button', onClick: () => close() }, 'Cancel'), submit));
+    },
+  });
 }
 
 async function signOut() {

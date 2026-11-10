@@ -6,7 +6,7 @@
 //
 // Bump VERSION whenever you deploy changes, so phones pick up the new files.
 
-const VERSION = 'ironlog-v2';
+const VERSION = 'ironlog-v3';
 
 const SHELL = [
   './',

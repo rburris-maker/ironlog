@@ -18,6 +18,9 @@ import './ui/profile.js';
 
 let started = false;
 let currentUserId = null;
+// True while a password-reset link is being completed: the app stays behind the
+// "choose a new password" screen until the new password is saved.
+let recovering = /(^|[#&?])type=recovery(&|$)/.test(location.hash) || /(^|[#&?])type=recovery(&|$)/.test(location.search);
 
 function startTicker() {
   if (started) return;
@@ -54,7 +57,7 @@ async function openApp(user, { offline = false } = {}) {
   ctx.offlineAuth = offline;
   await store.init(currentUserId);
   if (ctx.mode === 'local') store.seedIfNeeded();
-  hideAuth();
+  if (!recovering) hideAuth();
   initialRoute();
   startTicker();
   initRestBar();
@@ -163,13 +166,20 @@ async function boot() {
     showAuth(client);
   };
 
-  let recovering = false;
+  const finishRecovery = async () => {
+    recovering = false;
+    const { data } = await client.auth.getSession();
+    if (!data || !data.session) { showAuth(client, { message: 'Password saved. Sign in with your new password.' }); return; }
+    rememberUser(data.session.user);
+    if (data.session.user.id !== currentUserId) await openApp(data.session.user); else hideAuth();
+    toast('Password updated');
+  };
   client.auth.onAuthStateChange((event, session) => {
     // Never do async Supabase work inside this callback; defer it.
     setTimeout(async () => {
       if (event === 'PASSWORD_RECOVERY') {
         recovering = true;
-        showNewPassword(client, async () => { recovering = false; const { data } = await client.auth.getSession(); if (data.session) { rememberUser(data.session.user); await openApp(data.session.user); toast('Password updated'); } });
+        showNewPassword(client, finishRecovery);
         return;
       }
       if (recovering) return;
@@ -192,9 +202,11 @@ async function boot() {
   } catch (err) { session = null; sessionError = err; }
 
   if (session && session.user) {
+    if (recovering) { showNewPassword(client, finishRecovery); return; } // arrived from a reset link
     if (session.user.id !== currentUserId) { rememberUser(session.user); await openApp(session.user); }
     return;
   }
+  if (recovering) recovering = false; // the reset link was invalid or expired; fall through to sign-in
   const remembered = rememberedUser();
   if (remembered && !currentUserId && (navigator.onLine === false || sessionError)) {
     // Signed in before, but the session cannot be refreshed right now (no signal):
@@ -207,7 +219,8 @@ async function boot() {
     setInterval(reconnect, 30000);
     return;
   }
-  if (!currentUserId && !recovering) showAuth(client);
+  const linkExpired = /error_code=otp_expired|error=access_denied/.test(location.hash);
+  if (!currentUserId && !recovering) showAuth(client, linkExpired ? { message: 'That reset link has expired or was already used. Request a new one below.' } : {});
 }
 
 boot().catch((err) => {

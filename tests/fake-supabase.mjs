@@ -39,6 +39,12 @@ export function createServer() {
         if (!u || u.password !== req.password) return { error: { message: 'Invalid login credentials' } };
         return { data: { user: { id: u.id, email: req.email } } };
       }
+      if (req.op === 'setpassword') {
+        const u = [...users.values()].find((x) => x.id === req.token);
+        if (!u) return { error: { message: 'JWT required' } };
+        u.password = req.password;
+        return { data: {} };
+      }
       if (!(req.table in TABLES)) return { error: { message: `unknown table ${req.table}` } };
       if (!req.token || !uuidOk(req.token)) return { error: { message: 'JWT required' } };
 
@@ -95,11 +101,18 @@ export const CLIENT_SCRIPT = `
     return api;
   };
   const start = (user) => { localStorage.setItem(KEY, JSON.stringify({ user, access_token: 'test' })); };
+  const fromRecoveryLink = /type=recovery/.test(location.hash);
   window.__IRONLOG_TEST_CLIENT__ = {
     from,
     auth: {
       async getSession() { return { data: { session: session() }, error: null }; },
-      onAuthStateChange(fn) { listeners.push(fn); setTimeout(() => fn('INITIAL_SESSION', session()), 0); return { data: { subscription: { unsubscribe() {} } } }; },
+      onAuthStateChange(fn) {
+        listeners.push(fn);
+        setTimeout(() => fn('INITIAL_SESSION', session()), 0);
+        // like supabase-js: a reset link signs the user in, clears the URL, then announces PASSWORD_RECOVERY
+        if (fromRecoveryLink && session()) setTimeout(() => { history.replaceState(null, '', location.pathname); fn('PASSWORD_RECOVERY', session()); }, 40);
+        return { data: { subscription: { unsubscribe() {} } } };
+      },
       async signUp({ email, password }) {
         if (netDown()) return failed;
         const res = await window.__srv({ op: 'signup', email, password });
@@ -116,7 +129,12 @@ export const CLIENT_SCRIPT = `
       },
       async signOut() { localStorage.removeItem(KEY); fire('SIGNED_OUT'); return { error: null }; },
       async resetPasswordForEmail() { return { data: {}, error: null }; },
-      async updateUser() { return { data: {}, error: null }; },
+      async updateUser({ password }) {
+        if (netDown()) return failed;
+        const s = session();
+        const res = await window.__srv({ op: 'setpassword', password, token: s ? s.user.id : null });
+        return { data: res.data ?? null, error: res.error ?? null };
+      },
     },
   };
 })();

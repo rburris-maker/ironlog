@@ -4,6 +4,18 @@ import { h, clear, segmented } from '../lib/dom.js';
 import { APP_NAME } from '../../config.js';
 import { friendlyAuthError } from '../core/auth.js';
 
+/** Wrap a password input with a Show / Hide button, so a typo can be seen before it is saved. */
+export function passwordField(input) {
+  const toggle = h('button', { class: 'pw-toggle', type: 'button', 'aria-label': 'Show password', 'aria-pressed': 'false', onClick: () => {
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    toggle.textContent = show ? 'Hide' : 'Show';
+    toggle.setAttribute('aria-pressed', String(show));
+    toggle.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  } }, 'Show');
+  return h('div', { class: 'pw' }, input, toggle);
+}
+
 /** Render the sign-in screen into #auth. `client` is the Supabase client. */
 export function showAuth(client, { message = '' } = {}) {
   const root = document.getElementById('auth');
@@ -50,7 +62,7 @@ export function showAuth(client, { message = '' } = {}) {
       mode !== 'reset' && segmented([{ id: 'signin', label: 'Sign in' }, { id: 'signup', label: 'Create account' }], mode, (id) => { mode = id; draw(''); }, { label: 'Account' }),
       h('form', { class: 'auth-form', onSubmit },
         email,
-        mode !== 'reset' && password,
+        mode !== 'reset' && passwordField(password),
         submit,
         status),
       mode === 'reset'
@@ -60,23 +72,34 @@ export function showAuth(client, { message = '' } = {}) {
   draw();
 }
 
-/** Shown after following a password-reset link. */
+/** Shown after following a password-reset link: the user must choose a new password before going on. */
 export function showNewPassword(client, done) {
   const root = document.getElementById('auth');
   root.hidden = false;
   document.getElementById('app').hidden = true;
+  if (root.querySelector('[data-new-password]')) return; // already showing
   clear(root);
-  const password = h('input', { class: 'field field-lg', type: 'password', autocomplete: 'new-password', placeholder: 'New password (6+ characters)', 'aria-label': 'New password', required: true, minlength: '6' });
+  const password = h('input', { class: 'field field-lg', type: 'password', name: 'new-password', autocomplete: 'new-password', placeholder: 'New password (6+ characters)', 'aria-label': 'New password', required: true, minlength: '6' });
   const status = h('p', { class: 'auth-note', role: 'status' });
-  root.append(h('div', { class: 'auth-card' },
+  const submit = h('button', { class: 'btn btn-primary btn-block btn-lg', type: 'submit' }, 'Save password');
+  root.append(h('div', { class: 'auth-card', 'data-new-password': '' },
     h('div', { class: 'wordmark wordmark-lg' }, APP_NAME),
-    h('p', { class: 'auth-tag' }, 'Choose a new password.'),
+    h('p', { class: 'auth-tag' }, 'Choose a new password. Tap Show to check it before saving.'),
     h('form', { class: 'auth-form', onSubmit: async (e) => {
       e.preventDefault();
-      const { error } = await client.auth.updateUser({ password: password.value });
-      if (error) { status.textContent = friendlyAuthError(error); status.className = 'auth-note bad'; return; }
-      done();
-    } }, password, h('button', { class: 'btn btn-primary btn-block btn-lg', type: 'submit' }, 'Save password'), status)));
+      if (submit.disabled) return;
+      if (password.value.length < 6) { status.textContent = 'Use at least 6 characters.'; status.className = 'auth-note bad'; return; }
+      submit.disabled = true;
+      status.textContent = 'Saving…'; status.className = 'auth-note';
+      try {
+        const { error } = await client.auth.updateUser({ password: password.value });
+        if (error) throw error;
+        await done();
+      } catch (err) {
+        status.textContent = friendlyAuthError(err); status.className = 'auth-note bad';
+        submit.disabled = false;
+      }
+    } }, passwordField(password), submit, status)));
 }
 
 export function hideAuth() {
