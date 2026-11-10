@@ -112,7 +112,7 @@ tests/                  unit, browser end-to-end and database tests
 | Table | One row is | Key columns |
 |---|---|---|
 | `profiles` | a user's preferences | `user_id`, `prefs` (unit, rest timer…) |
-| `exercises` | a custom exercise | `id`, `user_id`, `name`, `muscle_group` |
+| `exercises` | a custom exercise | `id`, `user_id`, `name`, `muscle_group`, `muscles` (which muscles it works) |
 | `templates` | a reusable routine | `id`, `user_id`, `name`, `exercises` (JSON: order + target sets) |
 | `workouts` | one workout session | `id`, `user_id`, `name`, `status`, `started_at`, `duration_seconds`, `exercises` (JSON: sets, weights, reps, notes), `repeated_from_id` |
 
@@ -153,6 +153,14 @@ Design decisions worth knowing:
   the elapsed time is always recomputed from the clock.
 
 ---
+
+### Body: muscle ratings and recovery (`js/core/body.js`)
+
+Progress → Body shows a front/back muscle map with two views. Both are calculated from saved workouts, never stored.
+
+- **Strength.** Each muscle takes the level of your best lift that trains it directly (last 6 months): estimated 1RM ÷ bodyweight on the day of the lift, compared with the bodyweight-ratio standards published by [Strength Level](https://strengthlevel.com/strength-standards) (Beginner, Novice, Intermediate, Advanced, Elite — stronger than 5 / 20 / 50 / 80 / 95% of lifters). The ratios for the 15 rated lifts are in `STANDARDS`; the score is 20 points per level with straight lines between. Bodyweight and the men's/women's table are set in Profile and kept in `profiles.prefs`. Forearms, abs and calves have no standard and are not rated.
+- **Recovery.** An estimate, not a measurement. Every checked-off set adds load to the exercise's primary muscles (assisting muscles half; warm-ups less; AMRAP sets more). Load halves every 24 hours; ten hard sets = 100%. 60% and up is "needs rest", under 25% is "fresh". Tapping a muscle lets the user say how it actually feels, which overrides the estimate from that moment. The constants are in `RECOVERY`.
+- The muscles each built-in exercise works are listed in `js/core/exercises.js`; custom exercises choose theirs when created.
 
 ## Tests
 

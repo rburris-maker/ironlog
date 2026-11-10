@@ -20,8 +20,8 @@ const TABLES = [
   },
   {
     type: 'exercise', table: 'exercises', conflict: 'id',
-    toRow: (d, userId) => ({ id: d.id, user_id: userId, name: d.name, muscle_group: d.group || 'Other', created_at: d.createdAt, updated_at: d.updatedAt, deleted_at: d.deletedAt || null }),
-    fromRow: (r) => ({ id: r.id, name: r.name, group: r.muscle_group || 'Other', createdAt: iso(r.created_at), updatedAt: iso(r.updated_at), deletedAt: iso(r.deleted_at) }),
+    toRow: (d, userId) => ({ id: d.id, user_id: userId, name: d.name, muscle_group: d.group || 'Other', muscles: d.muscles || null, created_at: d.createdAt, updated_at: d.updatedAt, deleted_at: d.deletedAt || null }),
+    fromRow: (r) => ({ id: r.id, name: r.name, group: r.muscle_group || 'Other', ...(r.muscles ? { muscles: r.muscles } : {}), createdAt: iso(r.created_at), updatedAt: iso(r.updated_at), deletedAt: iso(r.deleted_at) }),
   },
   {
     type: 'template', table: 'templates', conflict: 'id',

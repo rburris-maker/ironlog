@@ -1,4 +1,4 @@
-// Profile: account, sync status, units, rest timer, install help, backup.
+// Profile: account, sync status, units, bodyweight, rest timer, install help, backup.
 
 import { h, icon, segmented, confirmDialog, toast, openSheet, add } from '../lib/dom.js';
 import { fmtDate, fmtTime, plural } from '../lib/format.js';
@@ -10,6 +10,7 @@ import { registerScreen, screenHeader, ctx } from './app.js';
 import { REST_PRESETS } from './rest.js';
 import { passwordField } from './authview.js';
 import { friendlyAuthError } from '../core/auth.js';
+import { bodyForm } from './body.js';
 
 function syncSection() {
   if (ctx.mode !== 'cloud') {
@@ -114,6 +115,10 @@ function renderProfile(el) {
       h('h2', { class: 'block-title' }, 'Units'),
       segmented([{ id: 'lb', label: 'Pounds (lb)' }, { id: 'kg', label: 'Kilograms (kg)' }], prefs.unit, (id) => { store.setPrefs({ unit: id }); toast(`Showing weights in ${id}`); }, { label: 'Weight unit' }),
       h('p', { class: 'hint' }, 'Past workouts keep the numbers you entered; they are converted for display and for comparing records.')),
+    h('section', { class: 'block', 'data-block': 'body' },
+      h('h2', { class: 'block-title' }, 'Body'),
+      h('p', { class: 'note' }, 'Used for the strength ratings in Progress → Body.'),
+      bodyForm({ submitLabel: 'Save', onDone: () => toast('Saved') })),
     h('section', { class: 'block' },
       h('h2', { class: 'block-title' }, 'Rest timer'),
       segmented(REST_PRESETS.map((s) => ({ id: String(s), label: `${s} s` })), String(prefs.restSeconds), (id) => store.setPrefs({ restSeconds: Number(id) }), { label: 'Default rest' }),

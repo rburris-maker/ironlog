@@ -6,7 +6,7 @@
 //
 // Bump VERSION (and js/version.js) whenever you deploy changes.
 
-const VERSION = 'ironlog-v6';
+const VERSION = 'ironlog-v7';
 
 const SHELL = [
   './',
@@ -25,9 +25,11 @@ const SHELL = [
   './js/core/session.js',
   './js/core/sync.js',
   './js/core/auth.js',
+  './js/core/body.js',
   './js/ui/app.js',
   './js/ui/active.js',
   './js/ui/authview.js',
+  './js/ui/body.js',
   './js/ui/charts.js',
   './js/ui/editor.js',
   './js/ui/history.js',

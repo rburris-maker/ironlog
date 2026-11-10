@@ -1,10 +1,11 @@
-// Progress tab: per-exercise charts over time, and the personal-records dashboard.
+// Progress tab: per-exercise charts over time, the personal-records dashboard, and the body map.
 
 import { h, icon, segmented, add } from '../lib/dom.js';
 import { fmtDate, fmtNum, fmtSet, fmtWeight, fmtVolume, fmtShortDate, plural } from '../lib/format.js';
 import { store } from '../core/store.js';
 import { exerciseSeries, RANGES, rangeStart, weekStart, E1RM_MAX_REPS } from '../core/calc.js';
-import { pushPage, registerScreen, pageHeader, screenHeader, refresh } from './app.js';
+import { go, pushPage, registerScreen, pageHeader, screenHeader, refresh } from './app.js';
+import { renderBody, bodyView } from './body.js';
 import { lineChart, barChart } from './charts.js';
 import { pickExercise } from './pickers.js';
 import { renderWorkoutDetail } from './history.js';
@@ -22,9 +23,17 @@ const METRICS = [
 function renderProgress(el) {
   add(el, 
     screenHeader('Progress'),
-    segmented([{ id: 'exercise', label: 'By exercise' }, { id: 'records', label: 'Personal records' }], view.tab, (id) => { view.tab = id; refresh(); }, { label: 'Progress section' }));
+    segmented([{ id: 'exercise', label: 'By exercise' }, { id: 'records', label: 'Records' }, { id: 'body', label: 'Body' }], view.tab, (id) => { view.tab = id; refresh(); }, { label: 'Progress section' }));
   if (view.tab === 'records') renderRecords(el);
+  else if (view.tab === 'body') renderBody(el);
   else renderExercise(el, view, true);
+}
+
+/** Jump straight to the body map (used by the Home screen). */
+export function openBody(mode = 'recovery') {
+  view.tab = 'body';
+  bodyView.mode = mode;
+  go('progress');
 }
 
 registerScreen('progress', renderProgress);

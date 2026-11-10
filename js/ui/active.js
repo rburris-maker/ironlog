@@ -9,6 +9,7 @@ import { blankWorkout, workoutFromTemplate, workoutFromPrevious, finishWorkout, 
 import { go, pushPage, registerScreen, currentRoute } from './app.js';
 import { workoutEditor } from './editor.js';
 import { rest, openRestSheet } from './rest.js';
+import { currentRecovery, stillRecovering } from './body.js';
 
 const nameOf = (id, fallback) => store.exerciseName(id, fallback);
 
@@ -49,18 +50,21 @@ export function openStartSheet() {
     body: (close) => {
       const templates = store.templates();
       const recent = store.workouts().slice(0, 12);
-      const row = (title, meta, onClick, attrs = {}) => h('button', { class: 'list-row', type: 'button', onClick: () => { close(); onClick(); }, ...attrs },
-        h('span', { class: 'list-main' }, h('span', { class: 'list-title' }, title), meta && h('span', { class: 'list-meta' }, meta)),
+      const status = currentRecovery();
+      // which muscles this routine leans on that have not recovered yet
+      const tired = (doc) => { const names = stillRecovering((doc.exercises || []).map((e) => e.exerciseId), status); return names.length ? `Still needs rest: ${names.join(', ')}` : ''; };
+      const row = (title, meta, onClick, attrs = {}, warn = '') => h('button', { class: 'list-row', type: 'button', onClick: () => { close(); onClick(); }, ...attrs },
+        h('span', { class: 'list-main' }, h('span', { class: 'list-title' }, title), meta && h('span', { class: 'list-meta' }, meta), warn && h('span', { class: 'list-meta st-text-worked', 'data-tired': '' }, warn)),
         icon('play', 18));
       return h('div', { class: 'start' },
         h('button', { class: 'btn btn-primary btn-block btn-lg', type: 'button', 'data-start': 'blank', onClick: () => { close(); startBlank(); } }, icon('plus', 22), 'Blank workout'),
         h('h3', { class: 'section-label' }, 'Saved templates'),
         templates.length
-          ? h('div', { class: 'list' }, templates.map((t) => row(t.name, summarizeExercises(t) || 'No exercises yet', () => startFromTemplate(t), { 'data-start-template': t.name })))
+          ? h('div', { class: 'list' }, templates.map((t) => row(t.name, summarizeExercises(t) || 'No exercises yet', () => startFromTemplate(t), { 'data-start-template': t.name }, tired(t))))
           : h('p', { class: 'empty-note' }, 'No templates yet. Build one in the Workouts tab, or save a finished workout as a template.'),
         h('h3', { class: 'section-label' }, 'Repeat a previous workout'),
         recent.length
-          ? h('div', { class: 'list' }, recent.map((w) => row(w.name, `${fmtDate(w.startedAt)} — ${summarizeExercises(w)}`, () => repeatWorkout(w), { 'data-start-repeat': w.name })))
+          ? h('div', { class: 'list' }, recent.map((w) => row(w.name, `${fmtDate(w.startedAt)} — ${summarizeExercises(w)}`, () => repeatWorkout(w), { 'data-start-repeat': w.name }, tired(w))))
           : h('p', { class: 'empty-note' }, 'Workouts you finish appear here, ready to repeat.'));
     },
   });

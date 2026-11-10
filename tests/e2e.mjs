@@ -245,7 +245,7 @@ console.log('\nPart 1b — timer and record recalculation (fresh device)');
   await step('7. The timer stays accurate across navigation, refresh, closing the app, pause and manual adjustment', async () => {
     await startBlank(page);
     const startedAt = await data(page, (store) => store.active().timer.runningSince);
-    await page.waitForTimeout(2100);
+    await page.waitForTimeout(2400);                         // the clock repaints every 250 ms, so leave room for one repaint
     assert.ok(await clockSeconds(page) >= 2, 'timer starts automatically and counts');
     await tab(page, 'history');                              // navigate away…
     assert.match(await page.locator('#active-bar').innerText(), /0:00:0\d/); // …a running clock stays visible
@@ -329,7 +329,7 @@ console.log('\nPart 1b — timer and record recalculation (fresh device)');
     assert.ok(before.prs >= 2);
 
     await tab(page, 'progress');
-    await page.click('.seg-item:text-is("Personal records")');
+    await page.click('.seg-item:text-is("Records")');
     assert.match(await page.locator('[data-record="bench-press"]').innerText(), /Heaviest\s*225 × 1/);
     await shot(page, '09-records');
 
@@ -484,11 +484,110 @@ console.log('\nPart 1b — timer and record recalculation (fresh device)');
     await tab(page, 'profile');
     await page.click('.seg-item:text-is("Kilograms (kg)")');
     await tab(page, 'progress');
-    await page.click('.seg-item:text-is("Personal records")');
+    await page.click('.seg-item:text-is("Records")');
     assert.match(await page.locator('[data-record="bench-press"]').innerText(), /92\.99 × 3/); // 205 lb in kg
     await tab(page, 'profile');
     await page.click('.seg-item:text-is("Pounds (lb)")');
     await shot(page, '14-profile');
+  });
+
+  await step('Body: trained muscles show as worked, a soreness check-in overrides the estimate, and lifts are rated against bodyweight standards', async () => {
+    await tab(page, 'home');
+    await page.waitForSelector('[data-block="recovery"]');
+    await page.click('[data-block="recovery"] .recov');
+    await page.waitForSelector('.body-map');
+    assert.equal(await page.locator('.figure').count(), 2, 'front and back figures');
+    // bench press was logged minutes ago in this run; calves never
+    assert.notEqual(await page.locator('[data-muscle-row="chest"]').getAttribute('data-state'), 'fresh');
+    assert.equal(await page.locator('[data-muscle-row="calves"]').getAttribute('data-state'), 'fresh');
+    assert.match(await page.locator('.figure [data-muscle="chest"]').first().getAttribute('class'), /st-(worked|recovering)/);
+    assert.match(await page.locator('.figure [data-muscle="calves"]').first().getAttribute('class'), /st-fresh/);
+    await shot(page, '16-body-recovery');
+    // tap the calves on the figure and report them very sore
+    await page.locator('.figure [data-muscle="calves"] polygon').first().click();
+    await page.waitForSelector('[data-sheet-state="fresh"]');
+    await shot(page, '17-body-muscle');
+    await page.click('[data-feel="very"]');
+    await page.waitForSelector('[data-muscle-row="calves"][data-state="worked"]');
+    assert.match(await page.locator('[data-muscle-row="calves"]').innerText(), /Needs rest/);
+    // …and take it back
+    await page.click('[data-muscle-row="calves"]');
+    await page.click('[data-feel="fresh"]');
+    await page.waitForSelector('[data-muscle-row="calves"][data-state="fresh"]');
+
+    // strength needs a bodyweight and a table first
+    await page.click('.seg-item:text-is("Strength")');
+    await page.waitForSelector('[data-form="body"]');
+    assert.equal(await page.locator('.body-map').count(), 0);
+    await page.click('[data-form="body"] button[type="submit"]');
+    assert.match(await page.locator('[data-form="body"] [role="status"]').innerText(), /bodyweight/i);
+    await page.fill('[data-form="body"] input[name="bodyweight"]', '200');
+    await page.click('.seg-item:text-is("Men’s standards")');
+    await page.click('[data-form="body"] button[type="submit"]');
+    await page.waitForSelector('[data-overall]');
+    // best bench is 205 × 3 → est. 225.5 lb ÷ 200 lb = 1.13× → Novice (1.00–1.25×)
+    const chest = page.locator('[data-muscle-row="chest"]');
+    assert.equal(await chest.getAttribute('data-level'), 'Novice');
+    assert.match(await chest.innerText(), /From Bench Press, 1\.13× bodyweight/);
+    assert.match(await page.locator('[data-muscle-row="calves"]').innerText(), /Not rated/);
+    assert.match(await page.locator('.figure [data-muscle="chest"]').first().getAttribute('class'), /lv-2/);
+    await shot(page, '18-body-strength');
+    await chest.click();
+    await page.waitForSelector('[data-sheet-level="Novice"]');
+    assert.match(await page.locator('.muscle-sheet').innerText(), /Intermediate at 1\.25× — about 250 lb/);
+    await shot(page, '19-body-muscle-strength');
+    await page.click('.sheet [aria-label="Close"]');
+    // weighing less on the day makes the same lift worth more
+    await page.click('[data-action="edit-body"]');
+    await page.fill('.sheet input[name="bodyweight"]', '150');
+    await page.click('.sheet [data-form="body"] button[type="submit"]');
+    await page.waitForSelector('[data-muscle-row="chest"][data-level="Advanced"]');
+    const prefs = await data(page, (store) => store.prefs);
+    assert.equal(prefs.standards, 'male');
+    assert.deepEqual(prefs.bodyweightLog.map((e) => [e.weight, e.unit]), [[150, 'lb']], 'a second entry on the same day replaces the first');
+    // survives a reload
+    await page.reload();
+    await ready(page);
+    await tab(page, 'progress');
+    await page.click('.seg-item:text-is("Body")');
+    await page.click('.seg-item:text-is("Strength")');
+    await page.waitForSelector('[data-muscle-row="chest"][data-level="Advanced"]');
+    // the start sheet opens without errors and lists the routines
+    await tab(page, 'home');
+    await page.click('[data-action="start"]');
+    await page.waitForSelector('[data-start="blank"]');
+    await shot(page, '20-start-sheet');
+    await page.click('.sheet [aria-label="Close"]');
+  });
+
+  await step('A custom exercise can be given the muscles it works, and counts toward their recovery', async () => {
+    await tab(page, 'workouts');
+    await page.click('.seg-item:text-is("Exercises")');
+    await page.click('[data-action="new-exercise"]');
+    await page.fill('.sheet input[type="text"]', 'Sled Drag');
+    await page.selectOption('.sheet select', 'Legs');
+    assert.deepEqual(await page.locator('.sheet [data-muscle-chip][aria-pressed="true"]').evaluateAll((els) => els.map((e) => e.dataset.muscleChip)), ['glutes', 'quads', 'hamstrings'], 'muscles follow the group until picked by hand');
+    await page.click('.sheet [data-muscle-chip="glutes"]');
+    await page.click('.sheet [data-muscle-chip="hamstrings"]');
+    await page.click('.sheet [data-muscle-chip="calves"]');
+    await page.click('.sheet button[type="submit"]');
+    const made = await data(page, (store) => store.list('exercise').find((e) => e.name === 'Sled Drag'));
+    assert.deepEqual(made.muscles, { primary: ['quads', 'calves'], secondary: [] });
+    await tab(page, 'home');
+    await startBlank(page);
+    await addExercise(page, 'Sled Drag');
+    await logSet(page, 'Sled Drag', 0, 90, 10);
+    await logSet(page, 'Sled Drag', 1, 90, 10);
+    // a workout in progress already counts
+    const calves = await data(page, async (store) => {
+      const { recoveryStatus } = await import('./js/core/body.js');
+      return recoveryStatus({ workouts: store.list('workout'), index: store.index(), musclesFor: (id) => store.musclesFor(id), soreness: store.prefs.soreness }).find((s) => s.muscle === 'calves');
+    });
+    assert.equal(calves.sets, 2);
+    assert.equal(calves.pct, 20);
+    await page.click('[data-action="discard"]');
+    await page.click('[data-confirm]');
+    await ready(page);
   });
 
   await context.close();
@@ -660,6 +759,28 @@ if (WITH_DB) {
     await a.evaluate(() => window.dispatchEvent(new Event('online')));
     await until(a, (store) => !store.active(), 'the discarded workout is gone from the first device');
     await a.waitForSelector('[data-action="start"]');
+  });
+
+  await step('Bodyweight, standards and a custom exercise\'s muscles are stored in the account and reach the other device', async () => {
+    await data(a, (store) => { store.addExercise('Sled Drag', 'Legs', ['quads', 'calves']); store.setBodyweight(190, 'lb'); store.setPrefs({ standards: 'female' }); });
+    await synced(a);
+    const ex = JSON.parse(sql(`select to_jsonb(e) from public.exercises e where name = 'Sled Drag'`));
+    assert.equal(ex.user_id, aliceId);
+    assert.deepEqual(ex.muscles, { primary: ['quads', 'calves'], secondary: [] });
+    const prefs = JSON.parse(sql(`select prefs from public.profiles where user_id = '${aliceId}'`));
+    assert.equal(prefs.standards, 'female');
+    assert.equal(prefs.bodyweightLog[0].weight, 190);
+    await a2.evaluate(() => window.dispatchEvent(new Event('online')));
+    await until(a2, (store) => store.prefs.standards === 'female' && !!store.bodyweight(), 'the second device has the bodyweight');
+    assert.deepEqual(await data(a2, (store) => store.musclesFor(store.list('exercise').find((e) => e.name === 'Sled Drag').id)), { primary: ['quads', 'calves'], secondary: [] });
+    // squat 225 × 5 → est. 262.5 lb ÷ 190 lb = 1.38× → Intermediate on the women's table (1.25–1.75×)
+    await tab(a2, 'progress');
+    await a2.click('.seg-item:text-is("Body")');
+    await a2.click('.seg-item:text-is("Strength")');
+    await a2.waitForSelector('[data-muscle-row="quads"][data-level="Intermediate"]');
+    await tab(a2, 'home');
+    // Bob sees none of it
+    assert.equal(Number(sql(`select count(*) from public.exercises where user_id = '${bobId}'`)), 0);
   });
 
   await step('Network failure: the workout is saved on the device and uploads once, later', async () => {

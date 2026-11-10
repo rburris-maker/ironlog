@@ -9,6 +9,8 @@ import { go, pushPage, registerScreen, ctx } from './app.js';
 import { openStartSheet, startFromTemplate, repeatWorkout, summarizeExercises } from './active.js';
 import { barChart } from './charts.js';
 import { renderWorkoutDetail, workoutRow } from './history.js';
+import { recoverySummary } from './body.js';
+import { openBody } from './progress.js';
 
 function syncBadge() {
   if (ctx.mode !== 'cloud') return null;
@@ -68,6 +70,8 @@ function renderHome(el) {
           sum.prs.length > 0 && h('span', { class: 'accent' }, h('strong', null, String(sum.prs.length)), sum.prs.length === 1 ? ' record' : ' records')),
         h('span', { class: 'list-sub' }, summarizeExercises(last, 4))),
       h('button', { class: 'btn btn-outline', 'data-action': 'repeat-last', onClick: () => repeatWorkout(last) }, icon('repeat', 18), 'Repeat'))));
+
+  add(el, recoverySummary(() => openBody('recovery')));
 
   add(el, h('section', { class: 'block' },
     h('h2', { class: 'block-title' }, 'Workouts per week'),

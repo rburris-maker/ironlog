@@ -3,7 +3,7 @@
 import { h, clear, icon, openSheet } from '../lib/dom.js';
 import { fmtDate, fmtCountdown } from '../lib/format.js';
 import { store } from '../core/store.js';
-import { GROUPS } from '../core/exercises.js';
+import { GROUPS, MUSCLES, GROUP_MUSCLES, musclesOf } from '../core/exercises.js';
 
 /**
  * pickExercise({ title, onPick, onlyWithHistory })
@@ -69,23 +69,70 @@ export function pickExercise({ title = 'Add exercise', onPick, onlyWithHistory =
   });
 }
 
-/** Small form: name + muscle group. Calls done(exercise). */
+/** Toggle chips for the muscles an exercise works. `selected` is a Set that the chips keep up to date. */
+export function muscleChips(selected, onChange = () => {}) {
+  const el = h('div', { class: 'chips chips-wrap', role: 'group', 'aria-label': 'Muscles worked' });
+  const draw = () => {
+    clear(el);
+    for (const m of MUSCLES) {
+      const on = selected.has(m.id);
+      el.append(h('button', { class: `chip ${on ? 'on' : ''}`, type: 'button', 'aria-pressed': on ? 'true' : 'false', 'data-muscle-chip': m.id, onClick: () => { if (on) selected.delete(m.id); else selected.add(m.id); onChange(); draw(); } }, m.name));
+    }
+  };
+  draw();
+  el.redraw = draw;
+  return el;
+}
+
+/** Change which muscles a custom exercise works. */
+export function editMuscles(exercise, done = () => {}) {
+  openSheet({
+    title: 'Muscles worked',
+    body: (close) => {
+      const selected = new Set(musclesOf(exercise).primary);
+      return h('form', { onSubmit: (e) => {
+        e.preventDefault();
+        const doc = store.get('exercise', exercise.id);
+        if (doc) store.put('exercise', { ...doc, muscles: { primary: [...selected], secondary: [] } });
+        close();
+        done();
+      } },
+        h('p', { class: 'sheet-text' }, `Pick the muscles ${exercise.name} mainly works. The Body screen uses this for recovery.`),
+        muscleChips(selected),
+        h('div', { class: 'btn-row' },
+          h('button', { class: 'btn btn-quiet', type: 'button', onClick: () => close() }, 'Cancel'),
+          h('button', { class: 'btn btn-primary', type: 'submit' }, 'Save')));
+    },
+  });
+}
+
+/** Small form: name, muscle group and the muscles worked. Calls done(exercise). */
 export function createExercise(name, group, done) {
   openSheet({
     title: 'New exercise',
     body: (close) => {
       const nameInput = h('input', { class: 'field', type: 'text', value: name || '', placeholder: 'Exercise name', 'aria-label': 'Exercise name', maxlength: '60', autocomplete: 'off' });
-      const groupSel = h('select', { class: 'field', 'aria-label': 'Muscle group' }, GROUPS.map((g) => h('option', { value: g, selected: g === group }, g)));
+      const selected = new Set(GROUP_MUSCLES[group] || []);
+      let touched = false;
+      const chips = muscleChips(selected, () => { touched = true; });
+      // until the muscles are picked by hand, they follow the group
+      const groupSel = h('select', { class: 'field', 'aria-label': 'Muscle group', onChange: (e) => {
+        if (touched) return;
+        selected.clear();
+        for (const m of GROUP_MUSCLES[e.target.value] || []) selected.add(m);
+        chips.redraw();
+      } }, GROUPS.map((g) => h('option', { value: g, selected: g === group }, g)));
       setTimeout(() => nameInput.focus(), 50);
       return h('form', { onSubmit: (e) => {
         e.preventDefault();
-        const ex = store.addExercise(nameInput.value, groupSel.value);
+        const ex = store.addExercise(nameInput.value, groupSel.value, [...selected]);
         if (!ex) { nameInput.focus(); return; }
         close();
         done(ex);
       } },
         h('label', { class: 'label' }, 'Name'), nameInput,
         h('label', { class: 'label' }, 'Muscle group'), groupSel,
+        h('p', { class: 'label' }, 'Muscles worked'), chips,
         h('div', { class: 'btn-row' },
           h('button', { class: 'btn btn-quiet', type: 'button', onClick: () => close() }, 'Cancel'),
           h('button', { class: 'btn btn-primary', type: 'submit' }, 'Create exercise')));

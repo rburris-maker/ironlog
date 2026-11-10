@@ -5,7 +5,8 @@
 
 import { openDocs, memoryDocs } from './idb.js';
 import { buildIndex } from './calc.js';
-import { BUILT_IN, STARTER_TEMPLATES } from './exercises.js';
+import { BUILT_IN, STARTER_TEMPLATES, musclesOf } from './exercises.js';
+import { latestBodyweight, withBodyweight } from './body.js';
 
 export const uid = () => {
   if (globalThis.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -17,7 +18,12 @@ export const uid = () => {
 
 export const nowIso = () => new Date().toISOString();
 
-export const DEFAULT_PREFS = { unit: 'lb', restSeconds: 90, restAuto: false, displayName: '', seeded: false };
+export const DEFAULT_PREFS = {
+  unit: 'lb', restSeconds: 90, restAuto: false, displayName: '', seeded: false,
+  standards: '',      // 'male' | 'female' — which published strength table to compare with
+  bodyweightLog: [],  // [{ date, weight, unit }]
+  soreness: {},       // { [muscle]: { level, at } } — recovery check-ins
+};
 
 const keyOf = (type, id) => `${type}:${id}`;
 const ls = {
@@ -258,12 +264,34 @@ class Store {
   exerciseName(id, fallback = 'Exercise') { const e = this.exercise(id); return e ? e.name : fallback; }
 
   /** Create a custom exercise, or return the existing one with the same name. */
-  addExercise(name, group = 'Other') {
+  addExercise(name, group = 'Other', primaryMuscles = null) {
     const clean = name.trim().replace(/\s+/g, ' ');
     if (!clean) return null;
     const existing = this.exercises().find((e) => e.name.toLowerCase() === clean.toLowerCase());
     if (existing) return existing;
-    return this.put('exercise', { id: uid(), name: clean, group });
+    const doc = { id: uid(), name: clean, group };
+    if (Array.isArray(primaryMuscles)) doc.muscles = { primary: primaryMuscles, secondary: [] };
+    return this.put('exercise', doc);
+  }
+
+  /** Muscles an exercise works: { primary, secondary }. Unknown exercises work nothing. */
+  musclesFor(id) { return musclesOf(this.exercise(id)); }
+
+  // ---------- body ----------
+
+  /** Latest bodyweight entry: { date, weight, unit } or null. */
+  bodyweight() { return latestBodyweight(this.prefs.bodyweightLog); }
+
+  setBodyweight(weight, unit = this.prefs.unit) {
+    if (!(weight > 0)) return;
+    this.setPrefs({ bodyweightLog: withBodyweight(this.prefs.bodyweightLog, weight, unit) });
+  }
+
+  /** Record how a muscle feels ('fresh' | 'sore' | 'very'), or clear the check-in with null. */
+  setSoreness(muscle, level) {
+    const next = { ...(this.prefs.soreness || {}) };
+    if (level) next[muscle] = { level, at: nowIso() }; else delete next[muscle];
+    this.setPrefs({ soreness: next });
   }
 
   // ---------- backup ----------

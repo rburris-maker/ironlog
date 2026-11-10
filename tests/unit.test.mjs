@@ -269,3 +269,175 @@ test('supersets: linking, labelling, unlinking and surviving a repeat', () => {
   assert.equal(info2.get(again.exercises[1].uid).last, true);
   assert.equal(info2.get(again.exercises[2].uid), undefined);
 });
+
+// ---------- body: muscle map, strength ratings, recovery ----------
+
+import { BUILT_IN, MUSCLE_IDS, musclesOf } from '../js/core/exercises.js';
+import { STANDARDS, scoreRatio, bodyweightAt, withBodyweight, strengthRatings, recoveryStatus, setEffort, nextLevel, tiredMuscles, RECOVERY } from '../js/core/body.js';
+
+const musclesFor = (id) => musclesOf(BUILT_IN.find((e) => e.id === id));
+const HOUR = 3600000;
+const daysAgo = (d, now) => new Date(now - d * 24 * HOUR).toISOString();
+
+test('every built-in exercise names valid muscles, and every standard lift exists', () => {
+  for (const e of BUILT_IN) {
+    assert.ok(e.muscles.primary.length > 0, `${e.id} has a primary muscle`);
+    for (const m of [...e.muscles.primary, ...e.muscles.secondary]) assert.ok(MUSCLE_IDS.includes(m), `${e.id}: ${m}`);
+  }
+  for (const [id, std] of Object.entries(STANDARDS)) {
+    assert.ok(BUILT_IN.some((e) => e.id === id), `${id} is a built-in exercise`);
+    for (const t of [std.male, std.female]) {
+      assert.equal(t.length, 5);
+      for (let i = 1; i < 5; i++) assert.ok(t[i] > t[i - 1], `${id} thresholds increase`);
+    }
+    for (const m of Object.keys(std.rates)) assert.ok(MUSCLE_IDS.includes(m));
+  }
+  // custom exercises fall back to their group, and bad muscle ids are dropped
+  assert.deepEqual(musclesOf({ group: 'Arms' }).primary, ['biceps', 'triceps']);
+  assert.deepEqual(musclesOf({ group: 'Legs', muscles: { primary: ['calves', 'nope'], secondary: [] } }), { primary: ['calves'], secondary: [] });
+  assert.deepEqual(musclesOf(null), { primary: [], secondary: [] });
+});
+
+test('strength score: 20 points per level, straight lines between', () => {
+  const bench = STANDARDS['bench-press'].male; // 0.5, 1, 1.25, 1.5, 2
+  assert.deepEqual(scoreRatio(0.25, bench), { score: 10, levelIndex: -1, level: 'Starting out' });
+  assert.deepEqual(scoreRatio(0.5, bench), { score: 20, levelIndex: 0, level: 'Beginner' });
+  assert.deepEqual(scoreRatio(1.25, bench), { score: 60, levelIndex: 2, level: 'Intermediate' });
+  assert.deepEqual(scoreRatio(1.375, bench), { score: 70, levelIndex: 2, level: 'Intermediate' });
+  assert.deepEqual(scoreRatio(3, bench), { score: 100, levelIndex: 4, level: 'Elite' });
+});
+
+test('bodyweight on the day of a lift comes from the log, converted to the right unit', () => {
+  const log = [{ date: '2026-03-01T12:00:00Z', weight: 200, unit: 'lb' }, { date: '2026-06-01T12:00:00Z', weight: 85, unit: 'kg' }];
+  assert.equal(bodyweightAt(log, '2026-01-10T10:00:00Z', 'lb'), 200); // before the log starts: first entry
+  assert.equal(bodyweightAt(log, '2026-04-10T10:00:00Z', 'lb'), 200);
+  assert.equal(bodyweightAt(log, '2026-07-01T10:00:00Z', 'kg'), 85);
+  assert.equal(Math.round(bodyweightAt(log, '2026-07-01T10:00:00Z', 'lb')), 187);
+  assert.equal(bodyweightAt([], '2026-07-01T10:00:00Z', 'lb'), null);
+  // a second entry on the same day replaces the first
+  const now = new Date('2026-06-01T18:00:00');
+  const next = withBodyweight([{ date: new Date('2026-06-01T08:00:00').toISOString(), weight: 180, unit: 'lb' }], 182, 'lb', now);
+  assert.equal(next.length, 1);
+  assert.equal(next[0].weight, 182);
+});
+
+test('muscle ratings come from the best direct lift at the bodyweight of the day', () => {
+  const now = new Date('2026-11-10T12:00:00Z');
+  const ws = [
+    workout('a', '2026-11-01T10:00:00Z', 'Push', [['bench-press', [set(225, 1)]], ['overhead-press', [set(95, 5)]]]),
+    workout('b', '2026-11-03T10:00:00Z', 'Legs', [['squat', [set(315, 1)]], ['calf-raise', [set(200, 20)]]]),
+    workout('old', '2025-01-03T10:00:00Z', 'Old', [['deadlift', [set(405, 1)]]]),
+  ];
+  const index = buildIndex(ws, 'lb');
+  const log = [{ date: '2025-01-01T00:00:00Z', weight: 180, unit: 'lb' }];
+
+  const none = strengthRatings({ index, bodyweightLog: log, table: '', now });
+  assert.equal(none.ready, false);
+  assert.equal(none.overall, null);
+
+  const r = strengthRatings({ index, bodyweightLog: log, table: 'male', now });
+  const m = Object.fromEntries(r.muscles.map((x) => [x.muscle, x]));
+  // bench 225 / 180 = 1.25 → exactly Intermediate
+  assert.equal(m.chest.level, 'Intermediate');
+  assert.equal(m.chest.score, 60);
+  assert.equal(m.chest.from.exerciseId, 'bench-press');
+  assert.equal(m.chest.indirect, false);
+  // shoulders: the overhead press rates them directly, so the bench (which only assists) is ignored
+  assert.equal(m.shoulders.from.exerciseId, 'overhead-press');
+  assert.equal(m.shoulders.level, 'Novice'); // 95×5 → est. 110.8 / 180 = 0.62
+  // triceps have no direct lift logged → estimated from the better of the two pressing lifts
+  assert.equal(m.triceps.indirect, true);
+  assert.equal(m.triceps.from.exerciseId, 'bench-press');
+  // squat 315 / 180 = 1.75 → Intermediate for quads and glutes
+  assert.equal(m.quads.level, 'Intermediate');
+  // deadlift is older than six months: still used, but flagged; it does not beat the squat for glutes on level alone
+  assert.equal(m.lowerBack.from.stale, true);
+  assert.equal(m.lowerBack.level, 'Intermediate'); // 405 / 180 = 2.25
+  assert.equal(m.calves.reason, 'no-standard');
+  assert.equal(m.biceps.reason, 'no-lifts');
+  assert.ok(r.overall.score > 0 && r.overall.rated >= 6);
+
+  // the women's table is stricter per pound lifted → the same lift rates higher
+  const f = strengthRatings({ index, bodyweightLog: log, table: 'female', now });
+  assert.ok(f.muscles.find((x) => x.muscle === 'chest').score > m.chest.score);
+
+  // weighing less on the day raises the ratio
+  const lighter = strengthRatings({ index, bodyweightLog: [{ date: '2025-01-01T00:00:00Z', weight: 150, unit: 'lb' }], table: 'male', now });
+  assert.equal(lighter.muscles.find((x) => x.muscle === 'chest').level, 'Advanced'); // 225 / 150 = 1.5
+
+  const nx = nextLevel(m.chest.from, 180);
+  assert.deepEqual(nx, { level: 'Advanced', ratio: 1.5, e1rm: 270 });
+});
+
+test('recovery: sets load the muscles they work and fade by half each day', () => {
+  const now = Date.parse('2026-11-10T12:00:00Z');
+  const bench10 = Array.from({ length: 10 }, () => set(200, 5));
+  const ws = [workout('w', daysAgo(0.01, now), 'Chest', [['bench-press', bench10]], { endedAt: daysAgo(0, now) })];
+  const index = buildIndex(ws, 'lb');
+  const at = (t, extra = {}) => Object.fromEntries(recoveryStatus({ workouts: ws, index, musclesFor, now: t, ...extra }).map((s) => [s.muscle, s]));
+
+  const s0 = at(now);
+  assert.equal(s0.chest.pct, 100);           // ten hard sets = fully worked
+  assert.equal(s0.chest.state, 'worked');
+  assert.equal(s0.chest.sets, 10);
+  assert.equal(s0.triceps.pct, 50);          // assisting muscles take half
+  assert.equal(s0.triceps.state, 'recovering');
+  assert.equal(s0.quads.pct, 0);
+  assert.equal(s0.quads.state, 'fresh');
+  assert.equal(s0.quads.lastWorked, null);
+  assert.equal(Math.round(s0.chest.readyInHours), 48); // 100% → 25% takes two half-lives
+
+  const s1 = at(now + 24 * HOUR);
+  assert.equal(s1.chest.pct, 50);
+  assert.equal(s1.chest.state, 'recovering');
+  assert.equal(s1.triceps.state, 'recovering');
+  const s2 = at(now + 49 * HOUR);
+  assert.equal(s2.chest.state, 'fresh');
+  // after a week the workout no longer counts at all
+  assert.equal(at(now + 8 * 24 * HOUR).chest.lastWorked, null);
+
+  // muscles a routine would hit that still need rest
+  const status = recoveryStatus({ workouts: ws, index, musclesFor, now });
+  assert.deepEqual(tiredMuscles(['incline-bench-press', 'squat'], status, musclesFor), ['chest']);
+  assert.deepEqual(tiredMuscles(['squat'], status, musclesFor), []);
+});
+
+test('recovery: warm-ups count less, AMRAP sets more, unchecked sets and deleted workouts not at all', () => {
+  assert.equal(setEffort({ weight: 200, reps: 5 }, 233.33), 1);
+  assert.equal(setEffort({ weight: 60, reps: 5 }, 233.33), 0.5);            // far below the best: a warm-up
+  assert.equal(setEffort({ weight: 200, reps: 5, amrap: true }, 233.33), 1.25);
+  assert.equal(setEffort({ weight: 0, reps: 15 }, 0), 1);                    // bodyweight work counts as a full set
+
+  const now = Date.parse('2026-11-10T12:00:00Z');
+  const ws = [
+    workout('w', daysAgo(0.5, now), 'Legs', [['squat', [set(300, 5), set(300, 5, false)]]]),
+    workout('gone', daysAgo(0.5, now), 'Deleted', [['squat', [set(300, 5)]]], { deletedAt: daysAgo(0.1, now) }),
+    { id: 'live', name: 'Now', status: 'active', unit: 'lb', startedAt: daysAgo(0.01, now), exercises: [{ uid: 'x', exerciseId: 'barbell-curl', name: 'Barbell Curl', sets: [set(80, 8), set(80, 8)] }] },
+  ];
+  const index = buildIndex(ws, 'lb');
+  const s = Object.fromEntries(recoveryStatus({ workouts: ws, index, musclesFor, now }).map((x) => [x.muscle, x]));
+  assert.equal(s.quads.sets, 1);
+  assert.equal(s.biceps.sets, 2);            // the workout in progress counts straight away
+  assert.equal(s.biceps.pct, 20);
+});
+
+test('recovery: a soreness check-in overrides the estimate from that moment on', () => {
+  const now = Date.parse('2026-11-10T12:00:00Z');
+  const ws = [workout('w', daysAgo(1.01, now), 'Chest', [['bench-press', Array.from({ length: 10 }, () => set(200, 5))]], { endedAt: daysAgo(1, now) })];
+  const index = buildIndex(ws, 'lb');
+  const run = (soreness, t = now) => Object.fromEntries(recoveryStatus({ workouts: ws, index, musclesFor, soreness, now: t }).map((x) => [x.muscle, x]));
+
+  assert.equal(run({}).chest.pct, 50);
+  // "very sore" just now → needs rest, whatever the sets say
+  const very = run({ chest: { level: 'very', at: new Date(now).toISOString() } });
+  assert.equal(very.chest.pct, RECOVERY.report.very);
+  assert.equal(very.chest.state, 'worked');
+  assert.equal(very.chest.report.level, 'very');
+  // "fresh" just now → ready, and untrained muscles can be marked sore too
+  const fresh = run({ chest: { level: 'fresh', at: new Date(now).toISOString() }, calves: { level: 'sore', at: new Date(now).toISOString() } });
+  assert.equal(fresh.chest.state, 'fresh');
+  assert.equal(fresh.calves.state, 'recovering');
+  // the report itself fades, and one older than a week is ignored
+  assert.equal(run({ chest: { level: 'very', at: new Date(now).toISOString() } }, now + 24 * HOUR).chest.pct, 40);
+  assert.equal(run({ quads: { level: 'very', at: daysAgo(9, now) } }).quads.report, null);
+});

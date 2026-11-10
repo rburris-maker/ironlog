@@ -7,7 +7,7 @@ import { duplicateTemplate, supersetInfo, linkSuperset, unlinkSuperset, normaliz
 import { GROUPS } from '../core/exercises.js';
 import { pushPage, popPage, registerScreen, pageHeader, screenHeader, refresh } from './app.js';
 import { startFromTemplate, summarizeExercises } from './active.js';
-import { pickExercise, createExercise, pickDuration } from './pickers.js';
+import { pickExercise, createExercise, pickDuration, editMuscles } from './pickers.js';
 import { openExerciseProgress } from './progress.js';
 
 let tab = 'templates';
@@ -173,6 +173,7 @@ function customMenu(e) {
       store.put('exercise', { ...doc, name });
       toast('Renamed. History and records stay attached to this exercise.');
     } },
+    { label: 'Muscles worked', icon: 'dumbbell', onSelect: () => editMuscles(e, () => toast('Muscles updated')) },
     { label: 'Delete from library', icon: 'trash', danger: true, onSelect: async () => {
       const ok = await confirmDialog({ title: `Delete “${e.name}”?`, message: 'It disappears from the library. Workouts that already include it keep their sets and records.', confirmLabel: 'Delete exercise', danger: true });
       if (ok) store.remove('exercise', e.id);

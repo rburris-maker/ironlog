@@ -32,11 +32,15 @@ create table if not exists public.exercises (
   user_id      uuid        not null default auth.uid() references auth.users (id) on delete cascade,
   name         text        not null,
   muscle_group text        not null default 'Other',
+  muscles      jsonb,                                    -- { primary: [...], secondary: [...] } muscle ids; null = assumed from muscle_group
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
   deleted_at   timestamptz,
   synced_at    timestamptz not null default clock_timestamp()
 );
+
+-- Added in version 7. Safe to run on a database created by an earlier version.
+alter table public.exercises add column if not exists muscles jsonb;
 
 create table if not exists public.templates (
   id         uuid primary key,

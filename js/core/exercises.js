@@ -86,8 +86,134 @@ const lib = {
   ],
 };
 
+// ---------- muscles ----------
+// Twelve muscle groups. Every exercise names the muscles it works hardest ("primary")
+// and the ones that assist ("secondary"); the Body screen uses this for recovery and ratings.
+
+export const MUSCLES = [
+  { id: 'chest', name: 'Chest' },
+  { id: 'back', name: 'Back', detail: 'lats and upper back' },
+  { id: 'lowerBack', name: 'Lower back' },
+  { id: 'shoulders', name: 'Shoulders' },
+  { id: 'biceps', name: 'Biceps' },
+  { id: 'triceps', name: 'Triceps' },
+  { id: 'forearms', name: 'Forearms' },
+  { id: 'abs', name: 'Abs' },
+  { id: 'glutes', name: 'Glutes' },
+  { id: 'quads', name: 'Quads' },
+  { id: 'hamstrings', name: 'Hamstrings' },
+  { id: 'calves', name: 'Calves' },
+];
+
+export const MUSCLE_IDS = MUSCLES.map((m) => m.id);
+export const muscleName = (id) => (MUSCLES.find((m) => m.id === id) || { name: id }).name;
+
+// exercise id -> 'primary muscles | secondary muscles'
+const WORKS = {
+  'bench-press': 'chest | triceps shoulders',
+  'incline-bench-press': 'chest | shoulders triceps',
+  'decline-bench-press': 'chest | triceps',
+  'dumbbell-bench-press': 'chest | triceps shoulders',
+  'incline-dumbbell-press': 'chest | shoulders triceps',
+  'machine-chest-press': 'chest | triceps shoulders',
+  'chest-fly': 'chest | shoulders',
+  'cable-crossover': 'chest | shoulders',
+  'pec-deck': 'chest |',
+  'push-up': 'chest | triceps shoulders abs',
+  'chest-dip': 'chest | triceps shoulders',
+
+  'deadlift': 'lowerBack glutes hamstrings | back quads forearms',
+  'barbell-row': 'back | biceps lowerBack forearms',
+  'dumbbell-row': 'back | biceps forearms',
+  't-bar-row': 'back | biceps lowerBack',
+  'seated-cable-row': 'back | biceps',
+  'lat-pulldown': 'back | biceps',
+  'pull-up': 'back | biceps forearms',
+  'chin-up': 'back biceps | forearms',
+  'machine-row': 'back | biceps',
+  'straight-arm-pulldown': 'back | triceps',
+  'back-extension': 'lowerBack | glutes hamstrings',
+  'shrug': 'back | forearms',
+
+  'overhead-press': 'shoulders | triceps abs',
+  'dumbbell-shoulder-press': 'shoulders | triceps',
+  'arnold-press': 'shoulders | triceps',
+  'machine-shoulder-press': 'shoulders | triceps',
+  'lateral-raise': 'shoulders |',
+  'cable-lateral-raise': 'shoulders |',
+  'front-raise': 'shoulders |',
+  'rear-delt-fly': 'shoulders | back',
+  'face-pull': 'shoulders | back',
+  'upright-row': 'shoulders | back biceps',
+
+  'barbell-curl': 'biceps | forearms',
+  'dumbbell-curl': 'biceps | forearms',
+  'hammer-curl': 'biceps forearms |',
+  'preacher-curl': 'biceps | forearms',
+  'cable-curl': 'biceps | forearms',
+  'tricep-pushdown': 'triceps |',
+  'overhead-tricep-extension': 'triceps |',
+  'skull-crusher': 'triceps |',
+  'close-grip-bench-press': 'triceps | chest shoulders',
+  'tricep-dip': 'triceps | chest shoulders',
+
+  'squat': 'quads glutes | hamstrings lowerBack abs',
+  'front-squat': 'quads | glutes abs',
+  'goblet-squat': 'quads | glutes abs',
+  'leg-press': 'quads | glutes hamstrings',
+  'hack-squat': 'quads | glutes',
+  'romanian-deadlift': 'hamstrings glutes | lowerBack forearms',
+  'bulgarian-split-squat': 'quads glutes | hamstrings',
+  'walking-lunge': 'quads glutes | hamstrings',
+  'leg-extension': 'quads |',
+  'leg-curl': 'hamstrings |',
+  'hip-thrust': 'glutes | hamstrings',
+  'calf-raise': 'calves |',
+  'seated-calf-raise': 'calves |',
+
+  'plank': 'abs |',
+  'hanging-leg-raise': 'abs | forearms',
+  'cable-crunch': 'abs |',
+  'ab-wheel': 'abs | shoulders',
+  'russian-twist': 'abs |',
+  'sit-up': 'abs |',
+
+  'power-clean': 'glutes hamstrings back | quads shoulders lowerBack',
+  'kettlebell-swing': 'glutes hamstrings | lowerBack shoulders',
+  'farmers-carry': 'forearms | back abs',
+  'sled-push': 'quads glutes | calves',
+};
+
+const parseWorks = (text) => {
+  const [p, s] = String(text || '|').split('|');
+  const words = (x) => (x || '').trim().split(/\s+/).filter(Boolean);
+  return { primary: words(p), secondary: words(s) };
+};
+
+/** What a custom exercise is assumed to work until its muscles are chosen. */
+export const GROUP_MUSCLES = {
+  Chest: ['chest'],
+  Back: ['back'],
+  Shoulders: ['shoulders'],
+  Arms: ['biceps', 'triceps'],
+  Legs: ['quads', 'glutes', 'hamstrings'],
+  Core: ['abs'],
+  Other: [],
+};
+
 export const BUILT_IN = Object.entries(lib).flatMap(([group, items]) =>
-  items.map(([id, name]) => ({ id, name, group, builtIn: true })));
+  items.map(([id, name]) => ({ id, name, group, builtIn: true, muscles: parseWorks(WORKS[id]) })));
+
+/** Muscles worked by any exercise record (built-in or custom). Always returns { primary, secondary }. */
+export function musclesOf(exercise) {
+  if (!exercise) return { primary: [], secondary: [] };
+  const m = exercise.muscles;
+  if (m && Array.isArray(m.primary)) {
+    const ok = (list) => (Array.isArray(list) ? list.filter((x) => MUSCLE_IDS.includes(x)) : []);
+    return { primary: ok(m.primary), secondary: ok(m.secondary) };
+  }
+  return { primary: [...(GROUP_MUSCLES[exercise.group] || [])], secondary: [] };
+}
 
 const t = (exerciseId, sets, reps) => ({ exerciseId, sets, reps });
 
